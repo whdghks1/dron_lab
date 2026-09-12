@@ -41,4 +41,8 @@ export class HongjecheonChunkSource implements AreaChunkSource {
     this.cache.set(key, request);
     return request;
   }
+
+  release(key: string) {
+    this.cache.delete(key);
+  }
 }

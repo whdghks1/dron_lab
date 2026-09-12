@@ -3,9 +3,9 @@ import { CameraController } from '../game/CameraController';
 import { CollisionSystem } from '../game/CollisionSystem';
 import { DEFAULT_FLIGHT_CONFIG, initialFlightState, stepFlight } from '../game/FlightPhysics';
 import { InputManager } from '../game/InputManager';
+import { canLand } from '../game/Landing';
 import type { FlightState, Vec3 } from '../game/types';
-import { HONGJECHEON_CONFIG as config } from '../areas/hongjecheon/config';
-import type { LoadedAreaData } from '../areas/types';
+import type { AreaConfig, LoadedAreaData } from '../areas/types';
 import { crossedCheckpoint } from '../utils/math';
 import { World, type Quality } from '../world/World';
 import { Hud } from '../ui/Hud';
@@ -22,28 +22,41 @@ export class DroneLabApp {
   private readonly hud = new Hud();
   private readonly minimap: MiniMap;
   private readonly mission: MissionPanel;
-  private flight: FlightState = initialFlightState(config.start, config.startYaw);
+  private readonly config: AreaConfig;
+  private flight: FlightState;
   private running = false;
   private started = false;
   private crashed = false;
   private completed = false;
+  private landed = false;
   private checkpoint = 0;
   private lastFrame = performance.now();
   private quality: Quality;
   private animationFrame = 0;
+  private bestTime?: number;
+  private performanceFrames = 0;
+  private performanceWindow = performance.now();
 
   constructor(canvas: HTMLCanvasElement, data: LoadedAreaData) {
+    this.config = data.config;
+    this.flight = initialFlightState(data.config.start, data.config.startYaw);
+    this.bestTime = this.readBestTime();
     this.quality = this.readQuality();
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.quality !== 'low', powerPreference: 'high-performance' });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = this.quality === 'high';
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.camera = new THREE.PerspectiveCamera(67, 1, 0.1, 1800);
-    this.world = new World(data.snapshot, data.elevation, this.quality, data.chunkSource);
+    this.world = new World(data.config, data.snapshot, data.elevation, this.quality, data.chunkSource, data.visuals);
     this.cameraController = new CameraController(this.camera);
     this.collision = new CollisionSystem(this.world.colliders, DEFAULT_FLIGHT_CONFIG.collisionRadius);
-    this.minimap = new MiniMap(document.getElementById('map') as HTMLCanvasElement, data.minimap);
-    this.mission = new MissionPanel(() => this.reset(false));
+    this.minimap = new MiniMap(document.getElementById('map') as HTMLCanvasElement, data.minimap, data.config);
+    this.mission = new MissionPanel(data.config, () => this.reset(false), this.bestTime);
+    document.title = `DRONE LAB — ${data.config.name}`;
+    document.getElementById('area-name')!.textContent = data.config.name;
+    document.getElementById('area-description')!.textContent = `${data.config.subtitle}의 실제 공간 관계를 따라 비행해 보세요.`;
+    const credits = [...new Set(data.visuals?.buildingPhotoTextures?.map((photo) => `${photo.attribution} (${photo.license})`) ?? [])];
+    if (credits.length > 0) document.getElementById('visual-credits')!.textContent = ` · 건물 사진: ${credits.join(', ')}`;
     this.bindUi();
     this.resize();
     this.reset(false);
@@ -66,16 +79,32 @@ export class DroneLabApp {
     this.world.updateDrone(this.flight.position, this.flight.yaw, this.flight.velocity, this.flight.elapsed);
     this.world.updateStreaming(this.flight.position);
     this.renderer.render(this.world.scene, this.camera);
-    this.hud.update(this.flight, this.crashed ? 'COLLISION' : this.running ? 'IN FLIGHT' : this.started ? 'PAUSED' : 'STANDBY', this.world.groundHeightAt(this.flight.position.x, this.flight.position.z));
-    this.hud.ambient(this.mission.mode === 'explore' ? `NEXT PLACE ${Math.min(this.checkpoint + 1, config.checkpoints.length)} / ${config.checkpoints.length}` : 'FREE FLIGHT · HONGJECHEON', this.flight.elapsed);
+    this.updatePerformance(now);
+    this.hud.update(this.flight, this.crashed ? 'COLLISION' : this.landed ? 'LANDED' : this.running ? 'IN FLIGHT' : this.started ? 'PAUSED' : 'STANDBY', this.world.groundHeightAt(this.flight.position.x, this.flight.position.z));
+    const ambient = this.completed ? 'MISSION COMPLETE · SAFE LANDING'
+      : this.mission.mode !== 'explore' ? `FREE FLIGHT · ${this.config.name}`
+      : this.checkpoint >= this.config.checkpoints.length ? 'RETURN TO BASE · LANDING REQUIRED'
+      : `NEXT PLACE ${this.checkpoint + 1} / ${this.config.checkpoints.length}`;
+    this.hud.ambient(ambient, this.flight.elapsed);
     this.minimap.draw(this.flight, this.checkpoint, this.mission.mode === 'explore');
     this.animationFrame = requestAnimationFrame(this.frame);
   };
 
+  private updatePerformance(now: number) {
+    this.performanceFrames += 1;
+    const elapsed = now - this.performanceWindow;
+    if (elapsed < 500) return;
+    const fps = Math.round(this.performanceFrames * 1000 / elapsed);
+    this.hud.updatePerformance(fps, this.world.streamingStats, this.renderer.info.memory);
+    this.performanceFrames = 0;
+    this.performanceWindow = now;
+  }
+
   private update(dt: number) {
     const previous = { ...this.flight.position };
     const wind = Number((document.getElementById('wind') as HTMLSelectElement).value);
-    const result = stepFlight(this.flight, this.input.snapshot(), dt, DEFAULT_FLIGHT_CONFIG, config.bounds, wind, this.world.groundHeightAt);
+    const input = this.input.snapshot();
+    const result = stepFlight(this.flight, input, dt, DEFAULT_FLIGHT_CONFIG, this.config.bounds, wind, this.world.groundHeightAt);
     this.flight = result.state;
     if (result.hitBoundary) this.hud.notify('MVP 비행구역 경계입니다 · 방향을 바꿔주세요', this.flight.elapsed);
     const altitudeAboveGround = this.flight.position.y - this.world.groundHeightAt(this.flight.position.x, this.flight.position.z);
@@ -89,23 +118,53 @@ export class DroneLabApp {
       this.renderControls();
       return;
     }
-    if (this.mission.mode === 'explore' && this.checkpoint < config.checkpoints.length) {
+    if (this.mission.mode === 'explore' && this.checkpoint < this.config.checkpoints.length) {
       const target = this.world.checkpointPositions[this.checkpoint];
       const from: Vec3 = this.checkpoint === 0 ? this.world.startPosition : this.world.checkpointPositions[this.checkpoint - 1];
       if (crossedCheckpoint(previous, this.flight.position, target, from, 6)) {
         this.checkpoint += 1;
-        if (this.checkpoint === config.checkpoints.length) {
-          this.completed = true;
-          this.running = false;
-          this.hud.notify(`탐험 완료 · ${this.flight.elapsed.toFixed(1)}초`, this.flight.elapsed, 30);
+        if (this.checkpoint === this.config.checkpoints.length) {
+          this.hud.notify('모든 장소 통과 · 출발 패드로 돌아가 착륙하세요', this.flight.elapsed, 8);
         } else {
-          this.hud.notify(`${config.checkpoints[this.checkpoint - 1].title} · 통과!`, this.flight.elapsed);
+          this.hud.notify(`${this.config.checkpoints[this.checkpoint - 1].title} · 통과!`, this.flight.elapsed);
         }
         this.mission.render(this.checkpoint, this.completed);
         this.world.setCheckpointState(this.checkpoint, true);
         this.renderControls();
       }
     }
+    const groundHeight = this.world.groundHeightAt(this.flight.position.x, this.flight.position.z);
+    if (canLand({
+      position: this.flight.position,
+      velocity: this.flight.velocity,
+      pad: this.config.start,
+      groundHeight,
+      descending: input.vertical < 0,
+    })) {
+      if (this.mission.mode === 'explore' && this.checkpoint < this.config.checkpoints.length) {
+        this.hud.notify('탐험 지점을 먼저 모두 통과하세요', this.flight.elapsed);
+      } else {
+        this.completeLanding();
+      }
+    }
+  }
+
+  private completeLanding() {
+    this.running = false;
+    this.landed = true;
+    this.flight.velocity = { x: 0, y: 0, z: 0 };
+    if (this.mission.mode === 'explore') {
+      this.completed = true;
+      if (this.bestTime === undefined || this.flight.elapsed < this.bestTime) {
+        this.bestTime = this.flight.elapsed;
+        localStorage.setItem(this.bestTimeKey, String(this.bestTime));
+      }
+      this.mission.render(this.checkpoint, true, this.bestTime);
+      this.hud.notify(`탐험 완료 · 안전 착륙 · ${this.flight.elapsed.toFixed(1)}초`, this.flight.elapsed, 30);
+    } else {
+      this.hud.notify('안전하게 착륙했습니다', this.flight.elapsed, 10);
+    }
+    this.renderControls();
   }
 
   private bindUi() {
@@ -127,6 +186,7 @@ export class DroneLabApp {
     document.getElementById('start')!.addEventListener('click', () => {
       if (this.crashed || this.completed) this.reset(false);
       this.started = true;
+      this.landed = false;
       this.running = true;
       this.hud.notify('이륙 준비 완료 · ↑로 상승하세요', this.flight.elapsed);
       this.renderControls();
@@ -152,29 +212,37 @@ export class DroneLabApp {
   }
 
   private reset(notify: boolean) {
-    this.flight = initialFlightState(this.world.startPosition, config.startYaw);
+    this.flight = initialFlightState(this.world.startPosition, this.config.startYaw);
     this.running = false;
     this.started = false;
     this.crashed = false;
     this.completed = false;
+    this.landed = false;
     this.checkpoint = 0;
     this.input.clear();
     this.cameraController.reset();
     this.world.setCheckpointState(0, this.mission.mode === 'explore');
-    this.mission.render(0, false);
+    this.mission.render(0, false, this.bestTime);
     if (notify) this.hud.notify('출발점으로 돌아왔습니다', 0);
     this.renderControls();
   }
 
   private renderControls() {
     const start = document.getElementById('start') as HTMLButtonElement;
-    start.innerHTML = `${this.crashed || this.completed ? '다시 비행하기' : this.running ? '비행 중' : this.started ? '비행 계속' : '비행 시작'} <span>↗</span>`;
+    start.innerHTML = `${this.crashed || this.completed ? '다시 비행하기' : this.landed ? '다시 이륙' : this.running ? '비행 중' : this.started ? '비행 계속' : '비행 시작'} <span>↗</span>`;
     (document.getElementById('pause') as HTMLButtonElement).innerHTML = `${this.running ? '일시정지' : '계속하기'} <kbd>P</kbd>`;
   }
 
   private readQuality(): Quality {
     const stored = localStorage.getItem('drone-lab-quality');
     return stored === 'low' || stored === 'medium' || stored === 'high' ? stored : matchMedia('(max-width: 700px)').matches ? 'low' : 'high';
+  }
+
+  private get bestTimeKey() { return `drone-lab-best-${this.config.id}`; }
+
+  private readBestTime(): number | undefined {
+    const value = Number(localStorage.getItem(this.bestTimeKey));
+    return Number.isFinite(value) && value > 0 ? value : undefined;
   }
 
   private cycleQuality() {

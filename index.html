@@ -11,22 +11,22 @@
     <div id="app">
       <canvas id="world" aria-label="홍제천 3D 드론 비행장"></canvas>
       <div id="loading" class="loading" role="status">
-        <div class="loader-mark">✣</div><strong>HONGJECHEON</strong><span>지역 데이터를 준비하고 있습니다</span>
+        <div class="loader-mark">✣</div><strong>DRONE LAB</strong><span>지역 데이터를 준비하고 있습니다</span>
       </div>
       <div id="error" class="error" hidden><strong>장면을 열 수 없습니다</strong><p id="error-message"></p><button onclick="location.reload()">다시 시도</button></div>
       <header class="topbar">
         <div class="brand"><span>✣</span><b>DRONE LAB</b><small>SEOUL FLIGHT</small></div>
-        <div class="location"><b>HONGJECHEON · 홍제천</b><span>서대문구 인공폭포 구간</span></div>
+        <div class="location"><label for="area-select">SEOUL AREA</label><select id="area-select" aria-label="비행 지역 선택"><option>홍제천 · 서대문구 인공폭포 구간</option></select></div>
         <button id="quality" class="ghost" aria-label="그래픽 품질 변경">품질 <b>HIGH</b></button>
         <button id="pause" class="ghost">일시정지 <kbd>P</kbd></button>
       </header>
       <aside class="mission panel">
         <p class="eyebrow">SEOUL AREA / 01</p>
-        <h1>홍제천을<br />따라 날다.</h1>
-        <p class="lede">실제 물길과 산책로 위를 천천히 탐험해 보세요.</p>
+        <h1><span id="area-name">홍제천</span>을<br />따라 날다.</h1>
+        <p id="area-description" class="lede">실제 물길과 산책로 위를 천천히 탐험해 보세요.</p>
         <div class="modes"><button id="free" class="selected">자유 비행</button><button id="explore">탐험 코스</button></div>
         <div class="course">
-          <span id="objective">비행 준비 완료</span><strong id="progress">FREE FLIGHT</strong>
+          <span id="objective">비행 준비 완료</span><strong id="progress">FREE FLIGHT</strong><small id="best-time">BEST --:--</small>
           <div id="segments"></div><p id="hint">비행 시작 후 W로 북쪽 물길을 따라가세요.</p>
         </div>
         <button class="launch" id="start">비행 시작 <span>↗</span></button>
@@ -49,12 +49,13 @@
         <div class="stat"><label>비행 거리</label><strong id="distance">0</strong><span>m</span></div>
         <div class="flight-state"><span id="state">STANDBY</span><small>고도 유지 · 조종 보조 ON</small></div>
       </footer>
+      <div id="performance" class="performance" aria-live="off">-- FPS · CHUNK -- · GPU --</div>
       <div class="help"><span><kbd>W A S D</kbd> 이동</span><span><kbd>↑ ↓</kbd> 고도</span><span><kbd>Q E</kbd> 회전</span><span><kbd>SPACE</kbd> 브레이크</span><span><kbd>SHIFT</kbd> 부스트</span></div>
       <div class="touch" aria-label="모바일 비행 조작">
         <div class="touch-move"><button data-key="q">↶</button><button data-key="w">▲</button><button data-key="e">↷</button><button data-key="a">◀</button><button data-key="s">▼</button><button data-key="d">▶</button></div>
         <div class="touch-height"><button data-key="arrowup">상승</button><button data-key="arrowdown">하강</button><button data-key=" ">정지</button></div>
       </div>
-      <div class="attribution"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a> · <a href="https://www.mapzen.com/rights/" target="_blank" rel="noreferrer">Elevation: Mapzen / NASA SRTM</a></div>
+      <div class="attribution"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a> · <a href="https://www.mapzen.com/rights/" target="_blank" rel="noreferrer">Elevation: Mapzen / NASA SRTM</a><span id="visual-credits"></span></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

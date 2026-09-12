@@ -1,6 +1,5 @@
-import type { AreaSnapshot } from '../areas/types';
+import type { AreaConfig, AreaSnapshot } from '../areas/types';
 import type { FlightState } from '../game/types';
-import { HONGJECHEON_CONFIG as config } from '../areas/hongjecheon/config';
 import { geoToLocal } from '../utils/geo';
 
 export class MiniMap {
@@ -8,7 +7,7 @@ export class MiniMap {
   private readonly width: number;
   private readonly height: number;
 
-  constructor(canvas: HTMLCanvasElement, private readonly data: AreaSnapshot) {
+  constructor(canvas: HTMLCanvasElement, private readonly data: AreaSnapshot, private readonly config: AreaConfig) {
     const context = canvas.getContext('2d');
     if (!context) throw new Error('미니맵 Canvas를 초기화할 수 없습니다.');
     this.context = context;
@@ -17,7 +16,7 @@ export class MiniMap {
   }
 
   private project(x: number, z: number) {
-    const { minX, maxX, minZ, maxZ } = config.bounds;
+    const { minX, maxX, minZ, maxZ } = this.config.bounds;
     const padding = 18;
     return {
       x: padding + (x - minX) / (maxX - minX) * (this.width - padding * 2),
@@ -38,13 +37,13 @@ export class MiniMap {
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 7]);
       ctx.beginPath();
-      config.checkpoints.forEach((checkpoint, index) => {
+      this.config.checkpoints.forEach((checkpoint, index) => {
         const point = this.project(checkpoint.position.x, checkpoint.position.z);
         if (index === 0) ctx.moveTo(point.x, point.y); else ctx.lineTo(point.x, point.y);
       });
       ctx.stroke();
       ctx.setLineDash([]);
-      config.checkpoints.forEach((checkpoint, index) => {
+      this.config.checkpoints.forEach((checkpoint, index) => {
         const point = this.project(checkpoint.position.x, checkpoint.position.z);
         ctx.beginPath();
         ctx.arc(point.x, point.y, index === checkpointIndex ? 7 : 4, 0, Math.PI * 2);
@@ -69,7 +68,7 @@ export class MiniMap {
     const ctx = this.context;
     ctx.beginPath();
     points.forEach((geo, index) => {
-      const local = geoToLocal(geo, config.origin);
+      const local = geoToLocal(geo, this.config.origin);
       const point = this.project(local.x, local.z);
       if (index === 0) ctx.moveTo(point.x, point.y); else ctx.lineTo(point.x, point.y);
     });

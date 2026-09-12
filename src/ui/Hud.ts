@@ -13,6 +13,7 @@ export class Hud {
   private distance = required<HTMLElement>('distance');
   private heading = required<HTMLElement>('heading');
   private state = required<HTMLElement>('state');
+  private performance = required<HTMLElement>('performance');
   private toast = required<HTMLElement>('toast');
   private toastUntil = 0;
 
@@ -35,5 +36,9 @@ export class Hud {
 
   ambient(message: string, elapsed: number) {
     if (elapsed > this.toastUntil) this.toast.textContent = message;
+  }
+
+  updatePerformance(fps: number, chunks: { active: number; cached: number; cacheLimit: number; pending: number }, memory: { geometries: number; textures: number }) {
+    this.performance.textContent = `${fps} FPS · CHUNK ${chunks.active}/${chunks.cached}/${chunks.cacheLimit} · GPU ${memory.geometries}G ${memory.textures}T${chunks.pending ? ` · LOAD ${chunks.pending}` : ''}`;
   }
 }

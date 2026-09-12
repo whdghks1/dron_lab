@@ -48,6 +48,8 @@ export function createWaterMaterial(): THREE.MeshPhysicalMaterial {
   return new THREE.MeshPhysicalMaterial({
     color: 0x70afbd,
     map,
+    bumpMap: map,
+    bumpScale: 0.16,
     roughness: 0.24,
     metalness: 0.08,
     clearcoat: 0.55,

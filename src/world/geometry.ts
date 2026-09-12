@@ -36,3 +36,14 @@ export function horizontalShape(points: THREE.Vector3[]): THREE.ShapeGeometry {
   geometry.rotateX(-Math.PI / 2);
   return geometry;
 }
+
+export function offsetPolyline(points: THREE.Vector3[], distance: number): THREE.Vector3[] {
+  return points.map((point, index) => {
+    const previous = points[Math.max(0, index - 1)];
+    const next = points[Math.min(points.length - 1, index + 1)];
+    const dx = next.x - previous.x;
+    const dz = next.z - previous.z;
+    const length = Math.hypot(dx, dz) || 1;
+    return new THREE.Vector3(point.x - dz / length * distance, point.y, point.z + dx / length * distance);
+  });
+}
