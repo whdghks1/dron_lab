@@ -38,7 +38,12 @@ export class Hud {
     if (elapsed > this.toastUntil) this.toast.textContent = message;
   }
 
-  updatePerformance(fps: number, chunks: { active: number; cached: number; cacheLimit: number; pending: number }, memory: { geometries: number; textures: number }) {
-    this.performance.textContent = `${fps} FPS · CHUNK ${chunks.active}/${chunks.cached}/${chunks.cacheLimit} · GPU ${memory.geometries}G ${memory.textures}T${chunks.pending ? ` · LOAD ${chunks.pending}` : ''}`;
+  updatePerformance(
+    fps: number,
+    chunks: { active: number; cached: number; cacheLimit: number; pending: number },
+    memory: { geometries: number; textures: number },
+    render: { calls: number; triangles: number },
+  ) {
+    this.performance.textContent = `${fps} FPS · DRAW ${render.calls} · TRI ${Math.round(render.triangles / 1000)}K · CHUNK ${chunks.active}/${chunks.cached}/${chunks.cacheLimit} · GPU ${memory.geometries}G ${memory.textures}T${chunks.pending ? ` · LOAD ${chunks.pending}` : ''}`;
   }
 }

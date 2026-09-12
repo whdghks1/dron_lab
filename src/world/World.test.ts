@@ -5,8 +5,10 @@ import snapshot from '../areas/hongjecheon/data/osm-snapshot.json';
 import elevation from '../areas/hongjecheon/data/elevation.json';
 import baseMap from '../areas/hongjecheon/data/generated/base-map.json';
 import centerChunk from '../areas/hongjecheon/data/generated/chunks/0_0.json';
+import detailChunk from '../areas/hongjecheon/data/generated/chunks/-1_-1.json';
 import type { AreaChunkSource, AreaSnapshot } from '../areas/types';
 import { HONGJECHEON_CONFIG as config } from '../areas/hongjecheon/config';
+import { HONGJECHEON_DETAILS } from '../areas/hongjecheon/details';
 import { CollisionSystem } from '../game/CollisionSystem';
 import { DEFAULT_FLIGHT_CONFIG } from '../game/FlightPhysics';
 import { World } from './World';
@@ -59,6 +61,18 @@ describe('Hongjecheon world', () => {
     assert.ok(lodCount > 0);
   });
 
+  it('adds Hongjecheon-only bridges, bank profiles, props, vegetation, and the authored waterfall', () => {
+    const detailedWorld = new World(config, snapshot, elevation, 'high', undefined, undefined, HONGJECHEON_DETAILS);
+    const names = new Set<string>();
+    detailedWorld.scene.traverse((object) => names.add(object.name));
+    assert.equal(names.has('bridge-support-old-concrete'), true);
+    assert.equal(names.has('riverbank-profile-stone-bank'), true);
+    assert.equal(names.has('quality-prop-street-lamp:medium-high'), true);
+    assert.equal(names.has('vegetation-crown-0'), true);
+    assert.equal(names.has('landmark-hongjecheon-waterfall-authored'), true);
+    assert.ok(detailedWorld.colliders.length > world.colliders.length);
+  });
+
   it('loads nearby map data once before flight', async () => {
     let requests = 0;
     const source: AreaChunkSource = {
@@ -77,6 +91,24 @@ describe('Hongjecheon world', () => {
     assert.equal(streamedWorld.loadedChunkCount, 1);
     const centerBridgeSegments = centerChunk.bridges.reduce((sum, bridge) => sum + Math.max(0, bridge.points.length - 1), 0);
     assert.equal(streamedWorld.colliders.length, centerChunk.buildings.length + centerBridgeSegments);
+  });
+
+  it('uses the current quality for detail chunks loaded after a quality change', async () => {
+    const source: AreaChunkSource = {
+      chunkSize: 240,
+      keysAround: () => ['-1:-1'],
+      load: async () => detailChunk,
+    };
+    const streamedWorld = new World(config, baseMap, elevation, 'high', source, undefined, HONGJECHEON_DETAILS);
+    streamedWorld.setQuality('low');
+    await streamedWorld.prepare(streamedWorld.startPosition);
+    const objects: THREE.Object3D[] = [];
+    [...streamedWorld.chunks.values()].forEach((chunk) => chunk.root.traverse((object) => objects.push(object)));
+    const qualityProps = objects.filter((object) => object.name.startsWith('quality-prop-'));
+    assert.ok(qualityProps.length > 0);
+    qualityProps.forEach((object) => assert.equal(object.visible, (object.userData.qualityLevels as string[]).includes('low')));
+    const vegetation = objects.find((object) => object.name === 'vegetation-trunks') as THREE.InstancedMesh;
+    assert.equal(vegetation.count, vegetation.userData.qualityCounts.low);
   });
 
   it('evicts least-recently-used streamed content above the quality budget', async () => {
@@ -100,5 +132,29 @@ describe('Hongjecheon world', () => {
     assert.equal(streamedWorld.streamingStats.cacheLimit, 10);
     assert.equal(streamedWorld.streamingStats.pending, 0);
     assert.ok(streamedWorld.streamingStats.active <= 2);
+  });
+
+  it('disposes detailed chunk geometry and removes its colliders after LRU eviction', async () => {
+    const emptyChunk: AreaSnapshot = { ...baseMap, water: [] };
+    const source: AreaChunkSource = {
+      chunkSize: 240,
+      keysAround: (x) => [`${Math.floor(x / 240)}:0`],
+      load: async (key) => key === '0:0' ? centerChunk : emptyChunk,
+    };
+    const streamedWorld = new World(config, baseMap, elevation, 'low', source, undefined, HONGJECHEON_DETAILS);
+    await streamedWorld.prepare({ x: 10, z: 10 });
+    const streamedRoot = [...streamedWorld.chunks.values()]
+      .flatMap((chunk) => chunk.root.children)
+      .find((object) => object.name === 'streamed-content-0:0');
+    assert.ok(streamedRoot);
+    let disposed = 0;
+    streamedRoot.traverse((object) => {
+      if (object instanceof THREE.Mesh) object.geometry.addEventListener('dispose', () => { disposed += 1; });
+    });
+    const collidersWithCenter = streamedWorld.colliders.length;
+    for (let index = 1; index <= 10; index += 1) await streamedWorld.prepare({ x: index * 240 + 10, z: 10 });
+    assert.equal(streamedRoot.parent, null);
+    assert.ok(disposed > 0);
+    assert.ok(streamedWorld.colliders.length < collidersWithCenter);
   });
 });

@@ -9,6 +9,9 @@ export const HONGJECHEON_VISUALS: AreaVisualConfig = {
     {
       featureIds: [174111567],
       url: '/textures/buildings/seodaemun-gu-office-2014.jpg',
+      facades: [
+        { direction: 'west', url: '/textures/buildings/seodaemun-gu-office-2014.jpg', repeat: [0.06, 0.08] },
+      ],
       attribution: '안우석 / Wikimedia Commons · 텍스처 매핑 적용',
       license: 'CC BY-SA 4.0',
       sourceUrl: 'https://commons.wikimedia.org/wiki/File:Seodaemun-gu_Office_20140513_150237.jpg',

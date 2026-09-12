@@ -53,7 +53,7 @@ export class DroneLabApp {
     this.renderer.shadowMap.enabled = this.quality === 'high';
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.camera = new THREE.PerspectiveCamera(67, 1, 0.1, 1800);
-    this.world = new World(data.config, data.snapshot, data.elevation, this.quality, data.chunkSource, data.visuals);
+    this.world = new World(data.config, data.snapshot, data.elevation, this.quality, data.chunkSource, data.visuals, data.details);
     this.cameraController = new CameraController(this.camera);
     this.collision = new CollisionSystem(this.world.colliders, DEFAULT_FLIGHT_CONFIG.collisionRadius);
     this.minimap = new MiniMap(document.getElementById('map') as HTMLCanvasElement, data.minimap, data.config);
@@ -128,7 +128,7 @@ export class DroneLabApp {
     const elapsed = now - this.performanceWindow;
     if (elapsed < 500) return;
     const fps = Math.round(this.performanceFrames * 1000 / elapsed);
-    this.hud.updatePerformance(fps, this.world.streamingStats, this.renderer.info.memory);
+    this.hud.updatePerformance(fps, this.world.streamingStats, this.renderer.info.memory, this.renderer.info.render);
     this.performanceFrames = 0;
     this.performanceWindow = now;
   }

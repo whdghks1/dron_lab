@@ -61,13 +61,23 @@
 
 ## 실제 건물 사진 텍스처
 
-서대문구청 본관에 [Wikimedia Commons 원본](https://commons.wikimedia.org/wiki/File:Seodaemun-gu_Office_20140513_150237.jpg)의 `Seodaemun-gu Office 20140513 150237.jpg` 1280px 파생본을 적용합니다. 저자는 안우석, 라이선스는 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)이며 OSM townhall 중심점이 들어 있는 building way `174111567`에만 연결합니다. 파일 자체는 다시 편집하지 않았지만 런타임에서 반복 텍스처로 매핑됩니다. 상세 출처와 변경 표시는 `public/textures/buildings/seodaemun-gu-office-2014.LICENSE.md`에 기록했습니다.
+서대문구청 본관에 [Wikimedia Commons 원본](https://commons.wikimedia.org/wiki/File:Seodaemun-gu_Office_20140513_150237.jpg)의 `Seodaemun-gu Office 20140513 150237.jpg` 1280px 파생본을 적용합니다. 저자는 안우석, 라이선스는 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)이며 OSM townhall 중심점이 들어 있는 building way `174111567`에만 연결합니다. 원본 EXIF의 카메라 위치와 약 81.4° 촬영 방향을 근거로 카메라가 동쪽을 향해 촬영한 서측 외벽 사진으로 판정했습니다. v0.10부터 해당 방향 한 면에만 적용하고 다른 외벽은 절차형 재질로 유지합니다. 상세 출처와 변경 표시는 `public/textures/buildings/seodaemun-gu-office-2014.LICENSE.md`에 기록했습니다.
+
+추가 외관 사진 조사 결과와 OSM ID 연결이 보류된 이유는 [홍제천 사진 후보 문서](hongjecheon-photo-candidates.md)에 기록했습니다. 라이선스만 명확하고 대상 건물·촬영 방향 연결이 불확실한 사진은 포함하지 않았습니다.
 
 ## 건물 수동 보강값
 
 원본 OSM과 수동 확인값을 섞지 않기 위해 `building-overrides.json`을 별도로 관리합니다. 현재는 [서대문자연사박물관 공식 층별 안내](https://namu.sdm.go.kr/web/main/contents/guide_facility_floor)의 1F–3F를 근거로 building way `174109591`의 `levels`를 3으로 보강합니다. 실제 높이 자료는 아니므로 렌더링 높이는 층당 3.2 m의 추정값입니다.
 
 따라서 이 버전은 실제 평면 위치 관계와 약 30 m 표고를 기반으로 하지만 측량·항법·실제 비행 용도로 사용할 수 없습니다.
+
+## v0.10 홍제천 세부 모델의 출처 구분
+
+- `osm`: 교량과 산책·자전거 경로의 평면 중심선, 하천 중심선, 건물 윤곽
+- `estimated`: 교량 폭·상판 두께·높이·교각 수와 재질 preset. OSM 형상 위에 추정값으로 생성
+- `authored`: 제방 구간별 프로파일, 계단 진입로, 난간·가로등·벤치 등 소품 규칙, 식생 분포와 인공폭포 placeholder
+
+`authored` 항목은 현장 조사나 측량값이 아니며 실제 시설의 정확한 위치·개수·형상을 의미하지 않습니다. 모든 텍스처와 geometry는 코드에서 생성했고 v0.10에서 새 외부 바이너리 에셋은 추가하지 않았습니다.
 
 ## 공역 정보 상태
 

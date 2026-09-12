@@ -1,7 +1,7 @@
 {
   "name": "drone-lab-seoul-flight",
   "private": true,
-  "version": "0.9.0",
+  "version": "0.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,8 +9,9 @@
     "preview": "vite preview",
     "data:chunks": "node scripts/build-area-chunks.mjs",
     "data:chunks:cheonggyecheon": "node scripts/build-area-chunks.mjs cheonggyecheon",
-    "test": "tsx --test 'src/**/*.test.ts'",
-    "test:watch": "tsx --test --watch 'src/**/*.test.ts'"
+    "perf:scene": "node --import tsx scripts/measure-world.ts",
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "test:watch": "node --import tsx --test --watch 'src/**/*.test.ts'"
   },
   "dependencies": {
     "three": "^0.180.0"

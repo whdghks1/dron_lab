@@ -4,6 +4,7 @@ import elevation from './elevation.json';
 import type { AreaSnapshot, ElevationGrid, LoadedAreaData } from '../../types';
 import { HONGJECHEON_CONFIG } from '../config';
 import { HONGJECHEON_VISUALS } from '../visuals';
+import { HONGJECHEON_DETAILS } from '../details';
 import { HongjecheonChunkSource } from './HongjecheonChunkSource';
 
 function isSnapshot(value: unknown): value is AreaSnapshot {
@@ -30,6 +31,7 @@ export async function loadHongjecheonData(): Promise<LoadedAreaData> {
     elevation,
     chunkSource: new HongjecheonChunkSource(),
     visuals: HONGJECHEON_VISUALS,
+    details: HONGJECHEON_DETAILS,
     airspace: {
       status: 'unavailable',
       zones: [],
