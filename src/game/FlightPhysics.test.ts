@@ -36,4 +36,11 @@ describe('assisted flight physics', () => {
     assert.equal(result.state.position.x, 100);
     assert.equal(result.state.position.y, 100);
   });
+
+  it('keeps the drone above sloped terrain', () => {
+    const state = initialFlightState({ x: 0, y: 5, z: 0 });
+    const result = stepFlight(state, { ...idle, forward: 1 }, 0.05, DEFAULT_FLIGHT_CONFIG, bounds, 0, () => 8);
+    assert.equal(result.state.position.y, 8 + DEFAULT_FLIGHT_CONFIG.minAltitude);
+    assert.equal(result.hitAltitudeLimit, true);
+  });
 });

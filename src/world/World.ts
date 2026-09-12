@@ -1,18 +1,15 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import type { AreaSnapshot, GeoFeature } from '../areas/types';
-import type { BoxCollider } from '../game/types';
+import type { AreaSnapshot, ElevationGrid, GeoFeature } from '../areas/types';
+import type { BoxCollider, Vec3 } from '../game/types';
 import { HONGJECHEON_CONFIG } from '../areas/hongjecheon/config';
 import { geoToLocal } from '../utils/geo';
 import { horizontalShape, ribbonGeometry } from './geometry';
+import { TerrainHeightField } from './TerrainHeightField';
 
 export type Quality = 'low' | 'medium' | 'high';
 
 const CONFIG = HONGJECHEON_CONFIG;
-const localPoints = (feature: GeoFeature, y = 0) => feature.points.map((point) => {
-  const local = geoToLocal(point, CONFIG.origin);
-  return new THREE.Vector3(local.x, y, local.z);
-});
 const seeded = (id: number) => ((id * 9301 + 49297) % 233280) / 233280;
 
 export class World {
@@ -20,10 +17,19 @@ export class World {
   readonly drone = new THREE.Group();
   readonly colliders: BoxCollider[] = [];
   readonly checkpointObjects: THREE.Group[] = [];
+  readonly heightField: TerrainHeightField;
+  readonly startPosition: Vec3;
+  readonly checkpointPositions: Vec3[];
   private trees?: THREE.InstancedMesh;
   private readonly rotors: THREE.Mesh[] = [];
 
-  constructor(private readonly data: AreaSnapshot, quality: Quality) {
+  constructor(private readonly data: AreaSnapshot, elevation: ElevationGrid, quality: Quality) {
+    this.heightField = new TerrainHeightField(elevation, CONFIG.origin);
+    this.startPosition = { ...CONFIG.start, y: this.heightField.sampleHeight(CONFIG.start.x, CONFIG.start.z) + CONFIG.start.y };
+    this.checkpointPositions = CONFIG.checkpoints.map((checkpoint) => ({
+      ...checkpoint.position,
+      y: this.heightField.sampleHeight(checkpoint.position.x, checkpoint.position.z) + checkpoint.position.y,
+    }));
     this.scene.background = new THREE.Color(0x9dc4ce);
     this.scene.fog = new THREE.FogExp2(0xa8c8c9, 0.00125);
     this.addLights(quality);
@@ -54,24 +60,22 @@ export class World {
 
   private addTerrain() {
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(1300, 1300, 1, 1),
-      new THREE.MeshStandardMaterial({ color: 0x789375, roughness: 1 }),
+      this.heightField.createGeometry(CONFIG.bounds),
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }),
     );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.32;
     ground.receiveShadow = true;
     this.scene.add(ground);
     for (const park of this.data.parks) {
-      const points = localPoints(park, -0.26);
-      if (points.length > 2) this.scene.add(new THREE.Mesh(horizontalShape(points), new THREE.MeshStandardMaterial({ color: 0x678967, roughness: 1 })));
+      const points = this.localPoints(park);
+      if (points.length > 2) this.scene.add(new THREE.Mesh(this.drape(horizontalShape(points), 0.05), new THREE.MeshStandardMaterial({ color: 0x678967, roughness: 1 })));
     }
   }
 
   private addWater() {
     const material = new THREE.MeshStandardMaterial({ color: 0x4f94a8, roughness: 0.24, metalness: 0.08, transparent: true, opacity: 0.92, side: THREE.DoubleSide });
     const polygonWater = this.data.water.filter((feature) => feature.points.length > 3 && feature.points[0].lat === feature.points.at(-1)?.lat && feature.points[0].lon === feature.points.at(-1)?.lon);
-    const geometries: THREE.BufferGeometry[] = polygonWater.map((feature) => horizontalShape(localPoints(feature, -0.12)));
-    this.data.water.filter((feature) => !polygonWater.includes(feature) && feature.kind === 'river').forEach((feature) => geometries.push(ribbonGeometry(localPoints(feature, -0.14), 13)));
+    const geometries: THREE.BufferGeometry[] = polygonWater.map((feature) => this.drape(horizontalShape(this.localPoints(feature)), 0.08));
+    this.data.water.filter((feature) => !polygonWater.includes(feature) && feature.kind === 'river').forEach((feature) => geometries.push(ribbonGeometry(this.localPoints(feature, 0.07), 13)));
     const merged = mergeGeometries(geometries);
     if (merged) this.scene.add(new THREE.Mesh(merged, material));
   }
@@ -87,12 +91,12 @@ export class World {
     this.data.roads.forEach((feature) => {
       const major = ['trunk', 'primary', 'secondary', 'tertiary'].includes(feature.kind);
       const width = major ? (feature.kind === 'trunk' ? 12 : 8) : feature.kind === 'service' ? 3.2 : 5;
-      (major ? majorGeometries : minorGeometries).push(ribbonGeometry(localPoints(feature, -0.22), width));
+      (major ? majorGeometries : minorGeometries).push(ribbonGeometry(this.localPoints(feature, 0.11), width));
     });
     const pathGeometries: THREE.BufferGeometry[] = [];
     this.data.paths.forEach((feature) => {
       const width = feature.kind === 'cycleway' ? 3.2 : 2;
-      pathGeometries.push(ribbonGeometry(localPoints(feature, -0.17), width));
+      pathGeometries.push(ribbonGeometry(this.localPoints(feature, 0.14), width));
     });
     ([[majorGeometries, roadMaterials.major], [minorGeometries, roadMaterials.minor], [pathGeometries, roadMaterials.path]] as const).forEach(([geometries, material]) => {
       const merged = mergeGeometries(geometries);
@@ -107,7 +111,7 @@ export class World {
     const material = new THREE.MeshStandardMaterial({ color: 0xb5bbb2, roughness: 0.88, vertexColors: false });
     const geometries: THREE.BufferGeometry[] = [];
     this.data.buildings.forEach((feature) => {
-      const points = localPoints(feature);
+      const points = this.localPoints(feature);
       if (points.length < 3) return;
       const shape = new THREE.Shape();
       points.forEach((point, index) => index === 0 ? shape.moveTo(point.x, -point.z) : shape.lineTo(point.x, -point.z));
@@ -115,10 +119,14 @@ export class World {
       const height = Math.min(65, Math.max(5, feature.height ?? 7 + seeded(feature.id) * 24));
       const geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
       geometry.rotateX(-Math.PI / 2);
+      const centerX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+      const centerZ = points.reduce((sum, point) => sum + point.z, 0) / points.length;
+      const baseHeight = this.heightField.sampleHeight(centerX, centerZ);
+      geometry.translate(0, baseHeight, 0);
       geometry.computeBoundingBox();
       geometries.push(geometry);
       const box = geometry.boundingBox!;
-      this.colliders.push({ minX: box.min.x, maxX: box.max.x, minY: 0, maxY: height, minZ: box.min.z, maxZ: box.max.z, label: feature.name || '주변 건물' });
+      this.colliders.push({ minX: box.min.x, maxX: box.max.x, minY: baseHeight, maxY: baseHeight + height, minZ: box.min.z, maxZ: box.max.z, label: feature.name || '주변 건물' });
     });
     const merged = mergeGeometries(geometries);
     if (!merged) return;
@@ -134,7 +142,7 @@ export class World {
     this.data.bridges.forEach((feature) => {
       const y = feature.kind === 'trunk' ? 13 : 3.8;
       const width = feature.kind === 'trunk' ? 13 : ['secondary', 'residential'].includes(feature.kind) ? 8 : 3;
-      geometries.push(ribbonGeometry(localPoints(feature, y), width));
+      geometries.push(ribbonGeometry(this.localPoints(feature, y), width));
     });
     const merged = mergeGeometries(geometries);
     if (!merged) return;
@@ -156,7 +164,7 @@ export class World {
       const x = Math.cos(angle) * radius + Math.sin(index) * 35;
       const z = Math.sin(angle) * radius;
       const scale = 0.75 + seeded(index + 191) * 0.65;
-      matrix.compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion(), new THREE.Vector3(scale, scale, scale));
+      matrix.compose(new THREE.Vector3(x, this.heightField.sampleHeight(x, z), z), new THREE.Quaternion(), new THREE.Vector3(scale, scale, scale));
       this.trees.setMatrixAt(index, matrix);
     }
     this.trees.castShadow = quality === 'high';
@@ -165,12 +173,13 @@ export class World {
 
   private addLandingPad() {
     const pad = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 0.18, 40), new THREE.MeshStandardMaterial({ color: 0x263e42, roughness: 0.8 }));
-    pad.position.set(CONFIG.start.x, 0, CONFIG.start.z);
+    const groundHeight = this.heightField.sampleHeight(CONFIG.start.x, CONFIG.start.z);
+    pad.position.set(CONFIG.start.x, groundHeight + 0.09, CONFIG.start.z);
     pad.receiveShadow = true;
     this.scene.add(pad);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(4.4, 0.13, 8, 48), new THREE.MeshBasicMaterial({ color: 0xcafa79 }));
     ring.rotation.x = Math.PI / 2;
-    ring.position.copy(pad.position).setY(0.14);
+    ring.position.copy(pad.position).setY(groundHeight + 0.2);
     this.scene.add(ring);
   }
 
@@ -196,17 +205,37 @@ export class World {
   }
 
   private createCheckpoints() {
-    CONFIG.checkpoints.forEach((checkpoint, index) => {
+    CONFIG.checkpoints.forEach((_, index) => {
       const group = new THREE.Group();
       const ring = new THREE.Mesh(new THREE.TorusGeometry(5, 0.28, 10, 42), new THREE.MeshStandardMaterial({ color: 0x889c96, emissive: 0x18211f, emissiveIntensity: 0.5 }));
-      const previous = index === 0 ? CONFIG.start : CONFIG.checkpoints[index - 1].position;
-      ring.rotation.y = Math.atan2(checkpoint.position.x - previous.x, checkpoint.position.z - previous.z);
+      const actualPosition = this.checkpointPositions[index];
+      const previous = index === 0 ? this.startPosition : this.checkpointPositions[index - 1];
+      ring.rotation.y = Math.atan2(actualPosition.x - previous.x, actualPosition.z - previous.z);
       group.add(ring);
-      group.position.set(checkpoint.position.x, checkpoint.position.y, checkpoint.position.z);
+      group.position.set(actualPosition.x, actualPosition.y, actualPosition.z);
       group.visible = false;
       this.checkpointObjects.push(group);
       this.scene.add(group);
     });
+  }
+
+  groundHeightAt = (x: number, z: number) => this.heightField.sampleHeight(x, z);
+
+  private localPoints(feature: GeoFeature, offset = 0): THREE.Vector3[] {
+    return feature.points.map((point) => {
+      const local = geoToLocal(point, CONFIG.origin);
+      return new THREE.Vector3(local.x, this.heightField.sampleHeight(local.x, local.z) + offset, local.z);
+    });
+  }
+
+  private drape<T extends THREE.BufferGeometry>(geometry: T, offset: number): T {
+    const positions = geometry.getAttribute('position');
+    for (let index = 0; index < positions.count; index += 1) {
+      positions.setY(index, this.heightField.sampleHeight(positions.getX(index), positions.getZ(index)) + offset);
+    }
+    positions.needsUpdate = true;
+    geometry.computeVertexNormals();
+    return geometry;
   }
 
   updateDrone(position: { x: number; y: number; z: number }, yaw: number, velocity: { x: number; z: number }, elapsed: number) {

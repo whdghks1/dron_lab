@@ -20,7 +20,15 @@ export function initialFlightState(position: Vec3, yaw = 0): FlightState {
   return { position: { ...position }, velocity: { x: 0, y: 0, z: 0 }, yaw, elapsed: 0, distance: 0 };
 }
 
-export function stepFlight(state: FlightState, input: FlightInput, dt: number, config: FlightConfig, bounds: Bounds, windLevel = 0): StepResult {
+export function stepFlight(
+  state: FlightState,
+  input: FlightInput,
+  dt: number,
+  config: FlightConfig,
+  bounds: Bounds,
+  windLevel = 0,
+  groundHeightAt: (x: number, z: number) => number = () => 0,
+): StepResult {
   const safeDt = Math.min(Math.max(dt, 0), 0.05);
   const boost = input.boost ? config.boostMultiplier : 1;
   const speed = config.maxSpeed * boost;
@@ -52,7 +60,8 @@ export function stepFlight(state: FlightState, input: FlightInput, dt: number, c
     hitBoundary = true;
   }
   const unclampedY = position.y;
-  position.y = clamp(position.y, config.minAltitude, config.maxAltitude);
+  const groundHeight = groundHeightAt(position.x, position.z);
+  position.y = clamp(position.y, groundHeight + config.minAltitude, groundHeight + config.maxAltitude);
   if (position.y !== unclampedY) velocity.y = 0;
   const traveled = Math.hypot(position.x - previous.x, position.y - previous.y, position.z - previous.z);
   return {

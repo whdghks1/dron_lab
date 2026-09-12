@@ -5,7 +5,7 @@ import { DEFAULT_FLIGHT_CONFIG, initialFlightState, stepFlight } from '../game/F
 import { InputManager } from '../game/InputManager';
 import type { FlightState, Vec3 } from '../game/types';
 import { HONGJECHEON_CONFIG as config } from '../areas/hongjecheon/config';
-import type { AreaSnapshot } from '../areas/types';
+import type { LoadedAreaData } from '../areas/types';
 import { crossedCheckpoint } from '../utils/math';
 import { World, type Quality } from '../world/World';
 import { Hud } from '../ui/Hud';
@@ -32,17 +32,17 @@ export class DroneLabApp {
   private quality: Quality;
   private animationFrame = 0;
 
-  constructor(canvas: HTMLCanvasElement, data: AreaSnapshot) {
+  constructor(canvas: HTMLCanvasElement, data: LoadedAreaData) {
     this.quality = this.readQuality();
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.quality !== 'low', powerPreference: 'high-performance' });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = this.quality === 'high';
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.camera = new THREE.PerspectiveCamera(67, 1, 0.1, 1800);
-    this.world = new World(data, this.quality);
+    this.world = new World(data.snapshot, data.elevation, this.quality);
     this.cameraController = new CameraController(this.camera);
     this.collision = new CollisionSystem(this.world.colliders, DEFAULT_FLIGHT_CONFIG.collisionRadius);
-    this.minimap = new MiniMap(document.getElementById('map') as HTMLCanvasElement, data);
+    this.minimap = new MiniMap(document.getElementById('map') as HTMLCanvasElement, data.snapshot);
     this.mission = new MissionPanel(() => this.reset(false));
     this.bindUi();
     this.resize();
@@ -61,7 +61,7 @@ export class DroneLabApp {
     this.cameraController.update(this.flight, dt);
     this.world.updateDrone(this.flight.position, this.flight.yaw, this.flight.velocity, this.flight.elapsed);
     this.renderer.render(this.world.scene, this.camera);
-    this.hud.update(this.flight, this.crashed ? 'COLLISION' : this.running ? 'IN FLIGHT' : this.started ? 'PAUSED' : 'STANDBY');
+    this.hud.update(this.flight, this.crashed ? 'COLLISION' : this.running ? 'IN FLIGHT' : this.started ? 'PAUSED' : 'STANDBY', this.world.groundHeightAt(this.flight.position.x, this.flight.position.z));
     this.hud.ambient(this.mission.mode === 'explore' ? `NEXT PLACE ${Math.min(this.checkpoint + 1, config.checkpoints.length)} / ${config.checkpoints.length}` : 'FREE FLIGHT · HONGJECHEON', this.flight.elapsed);
     this.minimap.draw(this.flight, this.checkpoint, this.mission.mode === 'explore');
     this.animationFrame = requestAnimationFrame(this.frame);
@@ -70,10 +70,11 @@ export class DroneLabApp {
   private update(dt: number) {
     const previous = { ...this.flight.position };
     const wind = Number((document.getElementById('wind') as HTMLSelectElement).value);
-    const result = stepFlight(this.flight, this.input.snapshot(), dt, DEFAULT_FLIGHT_CONFIG, config.bounds, wind);
+    const result = stepFlight(this.flight, this.input.snapshot(), dt, DEFAULT_FLIGHT_CONFIG, config.bounds, wind, this.world.groundHeightAt);
     this.flight = result.state;
     if (result.hitBoundary) this.hud.notify('MVP 비행구역 경계입니다 · 방향을 바꿔주세요', this.flight.elapsed);
-    if (result.hitAltitudeLimit && this.flight.position.y >= DEFAULT_FLIGHT_CONFIG.maxAltitude) this.hud.notify('최대 고도 100m', this.flight.elapsed);
+    const altitudeAboveGround = this.flight.position.y - this.world.groundHeightAt(this.flight.position.x, this.flight.position.z);
+    if (result.hitAltitudeLimit && altitudeAboveGround >= DEFAULT_FLIGHT_CONFIG.maxAltitude - 0.01) this.hud.notify('최대 지상고도 100m', this.flight.elapsed);
     const collision = this.collision.check(this.flight.position);
     if (collision) {
       this.crashed = true;
@@ -84,8 +85,8 @@ export class DroneLabApp {
       return;
     }
     if (this.mission.mode === 'explore' && this.checkpoint < config.checkpoints.length) {
-      const target = config.checkpoints[this.checkpoint].position;
-      const from: Vec3 = this.checkpoint === 0 ? config.start : config.checkpoints[this.checkpoint - 1].position;
+      const target = this.world.checkpointPositions[this.checkpoint];
+      const from: Vec3 = this.checkpoint === 0 ? this.world.startPosition : this.world.checkpointPositions[this.checkpoint - 1];
       if (crossedCheckpoint(previous, this.flight.position, target, from, 6)) {
         this.checkpoint += 1;
         if (this.checkpoint === config.checkpoints.length) {
@@ -146,7 +147,7 @@ export class DroneLabApp {
   }
 
   private reset(notify: boolean) {
-    this.flight = initialFlightState(config.start, config.startYaw);
+    this.flight = initialFlightState(this.world.startPosition, config.startYaw);
     this.running = false;
     this.started = false;
     this.crashed = false;

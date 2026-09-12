@@ -16,9 +16,9 @@ export class Hud {
   private toast = required<HTMLElement>('toast');
   private toastUntil = 0;
 
-  update(flight: FlightState, label: string) {
+  update(flight: FlightState, label: string, groundHeight = 0) {
     this.speed.textContent = (Math.hypot(flight.velocity.x, flight.velocity.y, flight.velocity.z) * 3.6).toFixed(1);
-    this.altitude.textContent = flight.position.y.toFixed(1);
+    this.altitude.textContent = Math.max(0, flight.position.y - groundHeight).toFixed(1);
     const minutes = Math.floor(flight.elapsed / 60);
     const seconds = Math.floor(flight.elapsed % 60);
     this.time.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;

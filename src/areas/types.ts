@@ -20,6 +20,25 @@ export interface AreaSnapshot {
   parks: GeoFeature[];
 }
 
+export interface ElevationGrid {
+  source: string;
+  sourceUrl: string;
+  capturedAt: string;
+  bounds: { south: number; west: number; north: number; east: number };
+  rows: number;
+  columns: number;
+  originElevation: number;
+  rawOriginElevation?: number;
+  minElevation: number;
+  maxElevation: number;
+  values: number[];
+}
+
+export interface LoadedAreaData {
+  snapshot: AreaSnapshot;
+  elevation: ElevationGrid;
+}
+
 export interface CheckpointConfig {
   id: string;
   title: string;
