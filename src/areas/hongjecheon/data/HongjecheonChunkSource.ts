@@ -29,10 +29,15 @@ export class HongjecheonChunkSource implements AreaChunkSource {
     if (!manifest) return Promise.reject(new Error(`알 수 없는 홍제천 청크: ${key}`));
     const importer = modules[`./generated/chunks/${manifest.file}`];
     if (!importer) return Promise.reject(new Error(`홍제천 청크 파일을 찾을 수 없습니다: ${manifest.file}`));
-    const request = importer().then((module) => {
-      if (!isSnapshot(module.default)) throw new Error(`홍제천 청크 형식이 올바르지 않습니다: ${manifest.file}`);
-      return module.default;
-    });
+    const request = importer()
+      .then((module) => {
+        if (!isSnapshot(module.default)) throw new Error(`홍제천 청크 형식이 올바르지 않습니다: ${manifest.file}`);
+        return module.default;
+      })
+      .catch((error: unknown) => {
+        this.cache.delete(key);
+        throw error;
+      });
     this.cache.set(key, request);
     return request;
   }

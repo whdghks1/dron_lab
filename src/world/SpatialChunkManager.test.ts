@@ -23,6 +23,12 @@ describe('spatial chunk manager', () => {
     assert.equal(manager.getOrCreate(2, 3), manager.getOrCreate(99, 99));
   });
 
+  it('resolves a serialized chunk key to the same cell', () => {
+    const manager = new SpatialChunkManager(new THREE.Scene(), { size: 100, loadRadius: 100, lodDistance: 50 });
+    assert.equal(manager.getOrCreateKey('-2:3'), manager.getOrCreate(-150, 350));
+    assert.throws(() => manager.getOrCreateKey('invalid'), /Invalid chunk key/);
+  });
+
   it('updates the active radius with graphics quality', () => {
     const manager = new SpatialChunkManager(new THREE.Scene(), { size: 100, loadRadius: 100, lodDistance: 50 });
     const far = manager.getOrCreate(350, 0);

@@ -95,6 +95,7 @@ export class World {
     const polygonWater = this.data.water.filter((feature) => feature.points.length > 3 && feature.points[0].lat === feature.points.at(-1)?.lat && feature.points[0].lon === feature.points.at(-1)?.lon);
     const geometries: THREE.BufferGeometry[] = polygonWater.map((feature) => this.drape(horizontalShape(this.localPoints(feature)), 0.08));
     this.data.water.filter((feature) => !polygonWater.includes(feature) && feature.kind === 'river').forEach((feature) => geometries.push(ribbonGeometry(this.localPoints(feature, 0.07), 13)));
+    if (geometries.length === 0) return;
     const merged = mergeGeometries(geometries);
     if (merged) this.scene.add(new THREE.Mesh(merged, this.waterMaterial));
   }
@@ -118,6 +119,7 @@ export class World {
       pathGeometries.push(ribbonGeometry(this.localPoints(feature, 0.14), width));
     });
     ([[majorGeometries, roadMaterials.major], [minorGeometries, roadMaterials.minor], [pathGeometries, roadMaterials.path]] as const).forEach(([geometries, material]) => {
+      if (geometries.length === 0) return;
       const merged = mergeGeometries(geometries);
       if (!merged) return;
       if (targetChunk) merged.translate(-targetChunk.x, 0, -targetChunk.z);
@@ -186,6 +188,7 @@ export class World {
       const width = feature.kind === 'trunk' ? 13 : ['secondary', 'residential'].includes(feature.kind) ? 8 : 3;
       geometries.push(ribbonGeometry(this.localPoints(feature, y), width));
     });
+    if (geometries.length === 0) return;
     const merged = mergeGeometries(geometries);
     if (!merged) return;
     if (targetChunk) merged.translate(-targetChunk.x, 0, -targetChunk.z);

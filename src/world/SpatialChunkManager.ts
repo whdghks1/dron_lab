@@ -67,7 +67,7 @@ export class SpatialChunkManager {
 }
 
 export function chunkSettingsForQuality(quality: 'low' | 'medium' | 'high'): ChunkSettings {
-  if (quality === 'low') return { size: 240, loadRadius: 340, lodDistance: 145 };
-  if (quality === 'medium') return { size: 240, loadRadius: 470, lodDistance: 210 };
-  return { size: 240, loadRadius: 620, lodDistance: 280 };
+  if (quality === 'low') return { size: 240, loadRadius: 200, lodDistance: 130 };
+  if (quality === 'medium') return { size: 240, loadRadius: 320, lodDistance: 190 };
+  return { size: 240, loadRadius: 440, lodDistance: 260 };
 }

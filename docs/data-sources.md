@@ -11,6 +11,8 @@
 - 포함 항목: `waterway`, `natural=water`, `water`, `highway`, `bridge`, `building`, `leisure=park`
 - 저장 위치: `src/areas/hongjecheon/data/osm-snapshot.json`
 
+런타임에는 이 원본을 직접 내려받지 않습니다. `npm run data:chunks`가 240 m 셀 단위의 `generated/chunks/*.json`, 수면만 담은 `base-map.json`, 축약 미니맵과 청크 인덱스를 생성합니다. 이 파일들은 같은 OSM 스냅샷의 파생물이며 출처와 라이선스도 동일합니다.
+
 이 앱과 미니맵은 화면에 `© OpenStreetMap contributors · ODbL` 링크를 상시 표시합니다. 스냅샷 또는 그 파생 데이터베이스를 별도로 배포할 때도 ODbL 의무를 확인해야 합니다.
 
 ## SRTM 표고 스냅샷
@@ -40,6 +42,7 @@
 - SRTM 격자로 표현하지 못하는 제방·계단·미세 지형, 장식용 나무, 착륙 패드, 탐험 링은 MVP용 제작 요소입니다.
 - 하천과 도로는 DEM 표면을 따르지만 수면 및 교량의 세부 높이는 시각적 분리를 위한 근사값입니다.
 - 로드뷰 이미지, 지도 타일, 제3자 텍스처는 수집하거나 포함하지 않았습니다.
+- 건물 창문 패턴과 흐르는 수면 무늬는 코드에서 생성한 절차형 텍스처입니다.
 
 따라서 이 버전은 실제 평면 위치 관계와 약 30 m 표고를 기반으로 하지만 측량·항법·실제 비행 용도로 사용할 수 없습니다.
 
