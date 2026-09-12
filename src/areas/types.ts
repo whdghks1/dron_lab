@@ -148,6 +148,7 @@ export interface PropPlacementRule {
 }
 
 export interface AssetAttribution {
+  name?: string;
   creator: string;
   sourceUrl: string;
   license: string;
@@ -195,6 +196,7 @@ export interface AreaDetailConfig {
   propRules?: PropPlacementRule[];
   landmarks?: LandmarkConfig[];
   vegetation?: VegetationConfig;
+  attributions?: AssetAttribution[];
 }
 
 export type AirspaceZoneKind = 'information' | 'caution' | 'restricted';

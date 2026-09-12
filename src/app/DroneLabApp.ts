@@ -88,6 +88,25 @@ export class DroneLabApp {
         creditElement.append(')');
       });
     }
+    const assetCredits = data.details?.attributions ?? [];
+    if (assetCredits.length > 0) {
+      creditElement.append(' · 재질: ');
+      assetCredits.forEach((asset, index) => {
+        if (index > 0) creditElement.append(', ');
+        const source = document.createElement('a');
+        source.textContent = `${asset.name ?? '에셋'} — ${asset.creator}`;
+        source.href = asset.sourceUrl;
+        source.target = '_blank';
+        source.rel = 'noreferrer';
+        creditElement.append(source, ' (');
+        const license = document.createElement('a');
+        license.textContent = asset.license;
+        license.href = asset.licenseUrl;
+        license.target = '_blank';
+        license.rel = 'noreferrer';
+        creditElement.append(license, ')');
+      });
+    }
     this.bindUi();
     this.resize();
     this.reset(false);

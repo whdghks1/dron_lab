@@ -79,6 +79,12 @@
 
 `authored` 항목은 현장 조사나 측량값이 아니며 실제 시설의 정확한 위치·개수·형상을 의미하지 않습니다. 모든 텍스처와 geometry는 코드에서 생성했고 v0.10에서 새 외부 바이너리 에셋은 추가하지 않았습니다.
 
+## v0.11 홍제천 PBR 재질
+
+홍제천의 콘크리트 교량·제방과 석재 제방에는 Poly Haven의 [Concrete](https://polyhaven.com/a/concrete)와 [Stone Wall 05](https://polyhaven.com/a/stone_wall_05)를 사용합니다. Poly Haven은 사이트의 에셋을 [CC0](https://polyhaven.com/license)로 제공합니다. 두 재질은 특정 홍제천 시설의 실제 표면 자료가 아닌 범용 재질이며, 위치·형상 데이터의 정확도를 높이는 자료로 간주하지 않습니다.
+
+Low는 1K diffuse만 사용하고 Medium/High는 512px OpenGL normal과 roughness를 추가합니다. AO·displacement와 원본 8K 파일은 포함하지 않았습니다. 파일별 원본 체크섬과 최적화 내용은 `THIRD_PARTY_ASSETS.md`에 기록했습니다.
+
 ## 공역 정보 상태
 
 두 지역의 공역 상태는 명시적으로 `unavailable`입니다. 상단 안전 패널은 이 상태를 사용자에게 알리며, 앱의 100 m 상한과 지역 경계는 시뮬레이션용 규칙입니다. 향후 공식 데이터가 연결되더라도 수집 시각, 원문 출처 URL, 고도 기준과 만료 정책을 함께 제공해야 합니다. 자세한 계약은 [공역 데이터 문서](airspace.md)를 참고하세요.

@@ -21,6 +21,7 @@ describe('area registry', () => {
   it('keeps the new detail rules in the Hongjecheon module', () => {
     assert.ok(HONGJECHEON_DETAILS.bridgeOverrides?.length);
     assert.ok(HONGJECHEON_DETAILS.propRules?.length);
+    assert.equal(HONGJECHEON_DETAILS.attributions?.length, 2);
     assert.deepEqual(CHEONGGYECHEON_VISUALS.buildingPhotoTextures, []);
   });
 });

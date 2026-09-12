@@ -6,7 +6,7 @@ import { geoToLocal } from '../utils/geo';
 import { assignExtrudeSideMaterialGroups, horizontalShape, ribbonGeometry } from './geometry';
 import { TerrainHeightField } from './TerrainHeightField';
 import { SpatialChunkManager, chunkSettingsForQuality, type SpatialChunk } from './SpatialChunkManager';
-import { createDetailMaterials, createFacadeMaterial, createWaterMaterial } from './materials';
+import { createDetailMaterials, createFacadeMaterial, createWaterMaterial, setDetailMaterialQuality } from './materials';
 import { BridgeBuilder } from './details/BridgeBuilder';
 import { RiverbankBuilder } from './details/RiverbankBuilder';
 import { PropPlacementSystem } from './details/PropPlacementSystem';
@@ -77,7 +77,7 @@ export class World {
   private readonly roadMinorMaterial = new THREE.MeshStandardMaterial({ color: 0x8c918c, roughness: 0.95 });
   private readonly pathMaterial = new THREE.MeshStandardMaterial({ color: 0xc3bfa6, roughness: 1 });
   private readonly photoFacadeMaterials = new Map<number, PhotoFacadeMaterialSet>();
-  private readonly detailMaterials = createDetailMaterials();
+  private readonly detailMaterials: ReturnType<typeof createDetailMaterials>;
   private readonly bridgeBuilder: BridgeBuilder;
   private readonly riverbankBuilder: RiverbankBuilder;
   private readonly propPlacement: PropPlacementSystem;
@@ -102,6 +102,7 @@ export class World {
     details?: AreaDetailConfig,
   ) {
     this.quality = quality;
+    this.detailMaterials = createDetailMaterials(quality);
     this.createPhotoFacadeMaterials(visuals);
     this.heightField = new TerrainHeightField(elevation, config.origin);
     this.chunks = new SpatialChunkManager(this.scene, chunkSettingsForQuality(quality));
@@ -656,6 +657,7 @@ export class World {
     this.propPlacement.setQuality(quality);
     this.vegetation.setQuality(quality);
     this.landmarkLoader.setQuality(quality);
+    setDetailMaterialQuality(this.detailMaterials, quality);
     const settings = chunkSettingsForQuality(quality);
     if (this.sun) this.sun.castShadow = quality === 'high';
     this.chunks.configure(settings);

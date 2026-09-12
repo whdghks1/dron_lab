@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { DetailMaterialPreset } from '../areas/types';
+import type { Quality } from './World';
 
 function dataTexture(size: number, pixel: (x: number, y: number) => [number, number, number, number]): THREE.DataTexture {
   const data = new Uint8Array(size * size * 4);
@@ -84,8 +85,149 @@ export type DetailMaterialSet = Record<DetailMaterialPreset, THREE.MeshStandardM
   waterfall: THREE.MeshPhysicalMaterial;
 };
 
+type ExternalTextureKind = 'diffuse' | 'normal' | 'roughness';
+
+interface ExternalSurfaceTextures {
+  diffuse?: THREE.Texture;
+  normal?: THREE.Texture;
+  roughness?: THREE.Texture;
+}
+
+interface DetailMaterialState {
+  quality: Quality;
+  concrete: ExternalSurfaceTextures;
+  stone: ExternalSurfaceTextures;
+  concreteFallbacks: THREE.Texture[];
+  stoneFallback: THREE.Texture;
+}
+
+const detailMaterialStates = new WeakMap<DetailMaterialSet, DetailMaterialState>();
+const EXTERNAL_DETAIL_TEXTURES = {
+  concrete: {
+    diffuse: '/textures/materials/polyhaven/concrete-diff-1k.jpg',
+    normal: '/textures/materials/polyhaven/concrete-normal-gl-512.jpg',
+    roughness: '/textures/materials/polyhaven/concrete-rough-512.jpg',
+  },
+  stone: {
+    diffuse: '/textures/materials/polyhaven/stone-wall-05-diff-1k.jpg',
+    normal: '/textures/materials/polyhaven/stone-wall-05-normal-gl-512.jpg',
+    roughness: '/textures/materials/polyhaven/stone-wall-05-rough-512.jpg',
+  },
+} as const;
+
+export function externalDetailTextureKinds(quality: Quality): ExternalTextureKind[] {
+  return quality === 'low' ? ['diffuse'] : ['diffuse', 'normal', 'roughness'];
+}
+
+function prepareExternalTexture(texture: THREE.Texture, color: boolean, repeat: number) {
+  if (color) texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeat, repeat);
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+}
+
+function loadExternalTexture(
+  url: string,
+  color: boolean,
+  repeat: number,
+  ready: (texture: THREE.Texture) => void,
+  failed: (texture: THREE.Texture) => void,
+) {
+  let texture: THREE.Texture;
+  texture = new THREE.TextureLoader().load(url, () => ready(texture), undefined, () => failed(texture));
+  prepareExternalTexture(texture, color, repeat);
+  return texture;
+}
+
+function clearSurfaceDetail(textures: ExternalSurfaceTextures, materials: THREE.MeshStandardMaterial[]) {
+  for (const kind of ['normal', 'roughness'] as const) {
+    const texture = textures[kind];
+    if (texture) texture.dispose();
+    textures[kind] = undefined;
+  }
+  materials.forEach((material) => {
+    material.normalMap = null;
+    material.roughnessMap = null;
+    material.needsUpdate = true;
+  });
+}
+
+function ensureSurfaceTextures(
+  state: DetailMaterialState,
+  surface: 'concrete' | 'stone',
+  materials: THREE.MeshStandardMaterial[],
+  repeat: number,
+) {
+  const textures = state[surface];
+  const urls = EXTERNAL_DETAIL_TEXTURES[surface];
+  if (!textures.diffuse) {
+    const texture = loadExternalTexture(urls.diffuse, true, repeat, (loaded) => {
+      if (textures.diffuse !== loaded) return loaded.dispose();
+      materials.forEach((material) => {
+        material.map = loaded;
+        material.color.setHex(surface === 'concrete' && material === materials[0] ? 0xd5d2c8 : 0xffffff);
+        material.needsUpdate = true;
+      });
+      const fallbacks = surface === 'concrete' ? state.concreteFallbacks : [state.stoneFallback];
+      fallbacks.forEach((fallback) => fallback.dispose());
+    }, (failed) => {
+      if (textures.diffuse === failed) textures.diffuse = undefined;
+      failed.dispose();
+      console.warn(`외부 디테일 텍스처를 불러오지 못해 절차형 재질을 유지합니다: ${urls.diffuse}`);
+    });
+    textures.diffuse = texture;
+  }
+  const enabledKinds = externalDetailTextureKinds(state.quality);
+  if (!enabledKinds.includes('normal') || !enabledKinds.includes('roughness')) return;
+  if (!textures.normal) {
+    const texture = loadExternalTexture(urls.normal, false, repeat, (loaded) => {
+      if (textures.normal !== loaded || state.quality === 'low') return loaded.dispose();
+      materials.forEach((material) => {
+        material.normalMap = loaded;
+        material.normalScale.setScalar(surface === 'stone' ? 0.62 : 0.42);
+        material.needsUpdate = true;
+      });
+    }, (failed) => {
+      if (textures.normal === failed) textures.normal = undefined;
+      failed.dispose();
+      console.warn(`외부 normal 텍스처를 불러오지 못했습니다: ${urls.normal}`);
+    });
+    textures.normal = texture;
+  }
+  if (!textures.roughness) {
+    const texture = loadExternalTexture(urls.roughness, false, repeat, (loaded) => {
+      if (textures.roughness !== loaded || state.quality === 'low') return loaded.dispose();
+      materials.forEach((material) => {
+        material.roughnessMap = loaded;
+        material.needsUpdate = true;
+      });
+    }, (failed) => {
+      if (textures.roughness === failed) textures.roughness = undefined;
+      failed.dispose();
+      console.warn(`외부 roughness 텍스처를 불러오지 못했습니다: ${urls.roughness}`);
+    });
+    textures.roughness = texture;
+  }
+}
+
+export function setDetailMaterialQuality(materials: DetailMaterialSet, quality: Quality) {
+  const state = detailMaterialStates.get(materials);
+  if (!state) return;
+  state.quality = quality;
+  const concreteMaterials = [materials['old-concrete'], materials['light-concrete']];
+  const stoneMaterials = [materials['stone-bank']];
+  if (quality === 'low') {
+    clearSurfaceDetail(state.concrete, concreteMaterials);
+    clearSurfaceDetail(state.stone, stoneMaterials);
+  }
+  ensureSurfaceTextures(state, 'concrete', concreteMaterials, 1.6);
+  ensureSurfaceTextures(state, 'stone', stoneMaterials, 2.25);
+}
+
 /** Small code-generated textures keep the detail system self-contained and license-free. */
-export function createDetailMaterials(): DetailMaterialSet {
+export function createDetailMaterials(quality: Quality = 'low'): DetailMaterialSet {
   const oldConcrete = patternedTexture([128, 130, 124], (x, y) => ((x * 7 + y * 11) % 17 === 0 ? -22 : 0));
   const lightConcrete = patternedTexture([184, 187, 178], (_x, y) => (y % 11 === 0 ? -10 : 0));
   const stone = patternedTexture([119, 116, 103], (x, y) => (x % 8 === 0 || y % 6 === 0 ? -19 : 5));
@@ -95,7 +237,7 @@ export function createDetailMaterials(): DetailMaterialSet {
   const grass = patternedTexture([91, 112, 72], (x, y) => ((x * 5 + y * 13) % 9) - 4);
   const standard = (color: number, map: THREE.Texture, roughness = 0.92, metalness = 0.02) =>
     new THREE.MeshStandardMaterial({ color, map, roughness, metalness });
-  return {
+  const materials: DetailMaterialSet = {
     'old-concrete': standard(0xa2a49d, oldConcrete, 0.98),
     'light-concrete': standard(0xd1d2c9, lightConcrete, 0.94),
     'stone-bank': standard(0xa3a092, stone, 1),
@@ -107,4 +249,15 @@ export function createDetailMaterials(): DetailMaterialSet {
     shadow: new THREE.MeshBasicMaterial({ color: 0x1a2325, transparent: true, opacity: 0.3, depthWrite: false }),
     waterfall: new THREE.MeshPhysicalMaterial({ color: 0x8fd7e4, roughness: 0.16, transmission: 0.16, transparent: true, opacity: 0.72, side: THREE.DoubleSide }),
   };
+  if (typeof document !== 'undefined') {
+    detailMaterialStates.set(materials, {
+      quality,
+      concrete: {},
+      stone: {},
+      concreteFallbacks: [oldConcrete, lightConcrete],
+      stoneFallback: stone,
+    });
+    setDetailMaterialQuality(materials, quality);
+  }
+  return materials;
 }

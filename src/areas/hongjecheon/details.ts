@@ -32,4 +32,20 @@ export const HONGJECHEON_DETAILS: AreaDetailConfig = {
     exclusionRadiusFromWater: 8.5,
     dataOrigin: 'authored',
   },
+  attributions: [
+    {
+      name: 'Concrete',
+      creator: 'Rob Tuytel / Poly Haven',
+      sourceUrl: 'https://polyhaven.com/a/concrete',
+      license: 'CC0 1.0',
+      licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+    },
+    {
+      name: 'Stone Wall 05',
+      creator: 'Charlotte Baglioni / Poly Haven',
+      sourceUrl: 'https://polyhaven.com/a/stone_wall_05',
+      license: 'CC0 1.0',
+      licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+    },
+  ],
 };
