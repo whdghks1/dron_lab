@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { AreaChunkSource, AreaConfig, AreaSnapshot, AreaVisualConfig, ElevationGrid, GeoFeature } from '../areas/types';
 import type { BoxCollider, Vec3 } from '../game/types';
 import { geoToLocal } from '../utils/geo';
-import { horizontalShape, offsetPolyline, ribbonGeometry } from './geometry';
+import { assignExtrudeSideMaterialGroups, horizontalShape, offsetPolyline, ribbonGeometry } from './geometry';
 import { TerrainHeightField } from './TerrainHeightField';
 import { SpatialChunkManager, chunkSettingsForQuality, type SpatialChunk } from './SpatialChunkManager';
 import { createFacadeMaterial, createWaterMaterial } from './materials';
@@ -37,8 +37,9 @@ export class World {
   private readonly rotors: THREE.Mesh[] = [];
   private readonly streamedChunks = new Map<string, StreamedChunkContent>();
   private readonly chunkRequests = new Map<string, Promise<void>>();
-  private readonly facadeMaterial = createFacadeMaterial();
+  private readonly facadeMaterials = [createFacadeMaterial(0), createFacadeMaterial(1), createFacadeMaterial(2)];
   private readonly roofMaterial = new THREE.MeshStandardMaterial({ color: 0x777d78, roughness: 0.94 });
+  private readonly rooftopMaterial = new THREE.MeshStandardMaterial({ color: 0x9da5a1, roughness: 0.78, metalness: 0.18 });
   private readonly simpleBuildingMaterial = new THREE.MeshStandardMaterial({ color: 0x9da8a1, roughness: 1 });
   private readonly waterMaterial = createWaterMaterial();
   private readonly parkMaterial = new THREE.MeshStandardMaterial({ color: 0x678967, roughness: 1 });
@@ -48,7 +49,11 @@ export class World {
   private readonly bridgeMaterial = new THREE.MeshStandardMaterial({ color: 0x4f5c60, roughness: 0.8 });
   private readonly bridgeRailMaterial = new THREE.MeshStandardMaterial({ color: 0xb4c0bc, roughness: 0.58, metalness: 0.28 });
   private readonly riverbankMaterial = new THREE.MeshStandardMaterial({ color: 0x96988e, roughness: 0.96 });
-  private readonly photoFacadeMaterials = new Map<number, THREE.MeshStandardMaterial>();
+  private readonly photoFacadeMaterials = new Map<number, THREE.MeshStandardMaterial[]>();
+  private readonly flightTrail = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ color: 0xcafa79, transparent: true, opacity: 0.62 }),
+  );
   private sun?: THREE.DirectionalLight;
   private quality: Quality;
   private streamClock = 0;
@@ -84,6 +89,9 @@ export class World {
     this.addTrees(quality);
     this.addLandingPad();
     this.createDrone();
+    this.flightTrail.name = 'flight-trail';
+    this.flightTrail.frustumCulled = false;
+    this.scene.add(this.flightTrail);
     this.createCheckpoints();
     this.chunks.update(this.startPosition);
   }
@@ -184,25 +192,30 @@ export class World {
     const loader = new THREE.TextureLoader();
     loader.setCrossOrigin('anonymous');
     for (const photo of visuals?.buildingPhotoTextures ?? []) {
-      const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.72, metalness: 0.02 });
-      material.map = loader.load(
-        photo.url,
-        (texture) => {
-          texture.colorSpace = THREE.SRGBColorSpace;
-          texture.wrapS = THREE.RepeatWrapping;
-          texture.wrapT = THREE.RepeatWrapping;
-          texture.repeat.set(0.06, 0.08);
-          material.needsUpdate = true;
-        },
-        undefined,
-        () => {
-          material.map = this.facadeMaterial.map;
-          material.color.copy(this.facadeMaterial.color);
-          material.needsUpdate = true;
-          console.warn(`건물 사진 텍스처를 불러오지 못해 절차형 외벽을 사용합니다: ${photo.url}`);
-        },
-      );
-      for (const featureId of photo.featureIds) this.photoFacadeMaterials.set(featureId, material);
+      const urls = photo.sideUrls?.length ? photo.sideUrls : [photo.url];
+      const materials = urls.map((url) => {
+        const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.72, metalness: 0.02 });
+        material.map = loader.load(
+          url,
+          (texture) => {
+            texture.colorSpace = THREE.SRGBColorSpace;
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(0.06, 0.08);
+            material.needsUpdate = true;
+          },
+          undefined,
+          () => {
+            const fallback = this.facadeMaterials[0];
+            material.map = fallback.map;
+            material.color.copy(fallback.color);
+            material.needsUpdate = true;
+            console.warn(`건물 사진 텍스처를 불러오지 못해 절차형 외벽을 사용합니다: ${url}`);
+          },
+        );
+        return material;
+      });
+      for (const featureId of photo.featureIds) this.photoFacadeMaterials.set(featureId, materials);
     }
   }
 
@@ -214,7 +227,15 @@ export class World {
   }
 
   private addBuildings(data: AreaSnapshot, quality: Quality, targetRoots = new Map<string, THREE.Object3D>()) {
-    const builders = new Map<string, { chunk: SpatialChunk; root: THREE.Object3D; detailed: THREE.BufferGeometry[]; photos: Array<{ geometry: THREE.BufferGeometry; material: THREE.Material }>; simple: THREE.BufferGeometry[] }>();
+    type Builder = {
+      chunk: SpatialChunk;
+      root: THREE.Object3D;
+      detailed: Map<THREE.Material, THREE.BufferGeometry[]>;
+      photos: Array<{ geometry: THREE.BufferGeometry; materials: THREE.Material[] }>;
+      rooftops: THREE.BufferGeometry[];
+      simple: THREE.BufferGeometry[];
+    };
+    const builders = new Map<string, Builder>();
     data.buildings.forEach((feature) => {
       const points = this.localPoints(feature);
       if (points.length < 3) return;
@@ -223,7 +244,7 @@ export class World {
       const chunk = this.chunks.getOrCreate(centerX, centerZ);
       let builder = builders.get(chunk.key);
       if (!builder) {
-        builder = { chunk, root: targetRoots.get(chunk.key) ?? chunk.root, detailed: [], photos: [], simple: [] };
+        builder = { chunk, root: targetRoots.get(chunk.key) ?? chunk.root, detailed: new Map(), photos: [], rooftops: [], simple: [] };
         builders.set(chunk.key, builder);
       }
       const shape = new THREE.Shape();
@@ -238,30 +259,53 @@ export class World {
       const box = geometry.boundingBox!;
       this.colliders.push({ minX: box.min.x, maxX: box.max.x, minY: baseHeight, maxY: baseHeight + height, minZ: box.min.z, maxZ: box.max.z, label: feature.name || '주변 건물' });
       geometry.translate(-chunk.x, 0, -chunk.z);
-      const photoMaterial = this.photoFacadeMaterials.get(feature.id);
-      if (photoMaterial) {
-        builder.photos.push({ geometry, material: photoMaterial });
+      const photoMaterials = this.photoFacadeMaterials.get(feature.id);
+      if (photoMaterials) {
+        assignExtrudeSideMaterialGroups(geometry, photoMaterials.length);
+        builder.photos.push({ geometry, materials: photoMaterials });
       } else {
-        builder.detailed.push(geometry);
+        const facade = this.facadeMaterials[Math.floor(seeded(feature.id + 71) * this.facadeMaterials.length)];
+        const geometries = builder.detailed.get(facade) ?? [];
+        geometries.push(geometry);
+        builder.detailed.set(facade, geometries);
       }
 
       const width = Math.max(1, box.max.x - box.min.x);
       const depth = Math.max(1, box.max.z - box.min.z);
+      if (width > 6 && depth > 6 && seeded(feature.id + 311) > 0.48) {
+        const equipmentWidth = Math.min(4, width * 0.32);
+        const equipmentDepth = Math.min(3.2, depth * 0.28);
+        const equipmentHeight = 0.55 + seeded(feature.id + 503) * 0.9;
+        const rooftop = new THREE.BoxGeometry(equipmentWidth, equipmentHeight, equipmentDepth);
+        rooftop.translate(
+          centerX - chunk.x + (seeded(feature.id + 719) - 0.5) * width * 0.32,
+          baseHeight + height + equipmentHeight / 2,
+          centerZ - chunk.z + (seeded(feature.id + 877) - 0.5) * depth * 0.32,
+        );
+        builder.rooftops.push(rooftop);
+      }
       const simplified = new THREE.BoxGeometry(width, height, depth);
       simplified.translate(centerX - chunk.x, baseHeight + height / 2, centerZ - chunk.z);
       builder.simple.push(simplified);
     });
-    builders.forEach(({ chunk, root, detailed, photos, simple }) => {
+    builders.forEach(({ chunk, root, detailed, photos, rooftops, simple }) => {
       const simpleGeometry = mergeGeometries(simple);
       if (!simpleGeometry) return;
       const near = new THREE.Group();
-      if (detailed.length > 0) {
-        const detailedGeometry = mergeGeometries(detailed);
-        if (detailedGeometry) near.add(this.buildingMesh(detailedGeometry, this.facadeMaterial, quality));
-      }
-      photos.forEach(({ geometry, material }) => {
-        near.add(this.buildingMesh(geometry, [this.roofMaterial, material], quality));
+      detailed.forEach((geometries, material) => {
+        const detailedGeometry = mergeGeometries(geometries);
+        if (detailedGeometry) near.add(this.buildingMesh(detailedGeometry, material, quality));
       });
+      photos.forEach(({ geometry, materials }) => {
+        near.add(this.buildingMesh(geometry, [this.roofMaterial, ...materials], quality));
+      });
+      const rooftopGeometry = rooftops.length > 0 ? mergeGeometries(rooftops) : null;
+      if (rooftopGeometry) {
+        const rooftopMesh = this.buildingMesh(rooftopGeometry, this.rooftopMaterial, quality);
+        rooftopMesh.name = 'quality-detail-rooftops';
+        rooftopMesh.visible = this.quality !== 'low';
+        near.add(rooftopMesh);
+      }
       const simpleMesh = new THREE.Mesh(simpleGeometry, this.simpleBuildingMaterial);
       simpleMesh.receiveShadow = true;
       const lod = new THREE.LOD();
@@ -465,6 +509,14 @@ export class World {
       this.waterMaterial.map.offset.x = elapsed * 0.004;
       this.waterMaterial.map.offset.y = Math.sin(elapsed * 0.12) * 0.025;
     }
+  }
+
+  setFlightTrail(points: Vec3[]) {
+    const previous = this.flightTrail.geometry;
+    this.flightTrail.geometry = new THREE.BufferGeometry().setFromPoints(
+      points.map((point) => new THREE.Vector3(point.x, point.y + 0.08, point.z)),
+    );
+    previous.dispose();
   }
 
   async prepare(position: Pick<Vec3, 'x' | 'z'>) {

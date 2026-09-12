@@ -30,5 +30,9 @@ export async function loadHongjecheonData(): Promise<LoadedAreaData> {
     elevation,
     chunkSource: new HongjecheonChunkSource(),
     visuals: HONGJECHEON_VISUALS,
+    airspace: {
+      status: 'unavailable',
+      zones: [],
+    },
   };
 }

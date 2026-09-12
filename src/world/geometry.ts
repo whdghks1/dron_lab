@@ -47,3 +47,20 @@ export function offsetPolyline(points: THREE.Vector3[], distance: number): THREE
     return new THREE.Vector3(point.x - dz / length * distance, point.y, point.z + dx / length * distance);
   });
 }
+
+/** Splits ExtrudeGeometry's side group into quad-sized, cycling material groups. */
+export function assignExtrudeSideMaterialGroups(geometry: THREE.BufferGeometry, sideMaterialCount: number) {
+  const count = Math.max(1, sideMaterialCount);
+  const capGroups = geometry.groups.filter((group) => group.materialIndex === 0);
+  const sideGroups = geometry.groups.filter((group) => group.materialIndex !== 0);
+  geometry.clearGroups();
+  capGroups.forEach((group) => geometry.addGroup(group.start, group.count, 0));
+  let side = 0;
+  sideGroups.forEach((group) => {
+    const end = group.start + group.count;
+    for (let start = group.start; start < end; start += 6) {
+      geometry.addGroup(start, Math.min(6, end - start), 1 + side % count);
+      side += 1;
+    }
+  });
+}

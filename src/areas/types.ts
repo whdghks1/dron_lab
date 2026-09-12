@@ -41,6 +41,7 @@ export interface LoadedAreaData {
   elevation: ElevationGrid;
   chunkSource: AreaChunkSource;
   visuals?: AreaVisualConfig;
+  airspace?: AreaAirspaceData;
 }
 
 export interface AreaChunkManifest {
@@ -60,12 +61,33 @@ export interface AreaChunkSource {
 export interface BuildingPhotoTexture {
   featureIds: number[];
   url: string;
+  /** Optional clockwise facade photos. Falls back to url when omitted. */
+  sideUrls?: string[];
   attribution: string;
   license: string;
 }
 
 export interface AreaVisualConfig {
   buildingPhotoTextures?: BuildingPhotoTexture[];
+}
+
+export type AirspaceZoneKind = 'information' | 'caution' | 'restricted';
+
+export interface AirspaceZone {
+  id: string;
+  label: string;
+  description: string;
+  kind: AirspaceZoneKind;
+  points: Array<Pick<Vec3, 'x' | 'z'>>;
+  minimumAltitude: number;
+  maximumAltitude: number;
+}
+
+export interface AreaAirspaceData {
+  status: 'unavailable' | 'advisory';
+  capturedAt?: string;
+  sourceUrl?: string;
+  zones: AirspaceZone[];
 }
 
 export interface CheckpointConfig {
