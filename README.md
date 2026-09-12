@@ -1,34 +1,110 @@
-# DRONE LAB — Riverside Flight Simulator
-# DRONE LAB — Riverside Flight Simulator
+# DRONE LAB — Hongjecheon MVP
 
-브라우저에서 바로 실행되는 가벼운 3D 드론 비행 시뮬레이터입니다.
+설치 없이 브라우저에서 서울의 실제 공간 관계를 따라 비행하는 웹 기반 드론 여행 시뮬레이터입니다. 첫 지역은 서울 서대문구 **홍제천 인공폭포 일대 약 1 km 구간**입니다.
 
-## 실행
+기존 Canvas 2D 프로토타입은 `dist/`에 그대로 보존되어 있습니다. 현재 MVP는 Vite + TypeScript + Three.js 기반의 새 구조로 실행됩니다.
 
-별도 설치나 빌드가 필요하지 않습니다. `dist/index.html`을 브라우저에서 열거나 VS
-Code의 Live Server로 실행하세요.
+## 현재 구현 범위
+
+- OpenStreetMap 스냅샷에 기반한 홍제천 수면, 자전거길·산책로, 도로, 교량, 건물 위치
+- 실제 위·경도를 기준점 중심의 로컬 미터 좌표로 변환
+- 보조 조종 자유 비행: 입력 해제 시 자동 감속, 무입력 시 고도 유지
+- 추적 카메라와 드론 1인칭(FPV) 카메라
+- 건물 충돌, 100 m 고도 제한, 약 1 km MVP 비행구역 경계
+- 홍제천 인공폭포에서 상·하류를 오가는 8개 장소 탐험 코스
+- 속도·고도·시간·거리 HUD와 실제 지역 형상을 그리는 미니맵
+- 바람 세기, 일시정지, 초기화, 그래픽 품질 설정
+- 키보드와 모바일 터치 조작, 반응형 UI
+- 로딩, 지역 데이터 오류, WebGL 미지원 안내
+
+## 설치 및 실행
+
+Node.js 20 이상을 권장합니다.
+
 ```bash
-python3 -m http.server 8080 --directory dist
+npm install
+npm run dev
 ```
 
-그다음 `http://localhost:8080`을 엽니다.
+터미널에 표시된 주소(기본 `http://127.0.0.1:5173`)를 엽니다.
+
+프로덕션 빌드와 미리보기:
+
+```bash
+npm run build
+npm run preview
+```
+
+핵심 계산 테스트:
+
+```bash
+npm test
+```
 
 ## 조작
 
 - `W A S D`: 전후좌우 이동
 - `↑ ↓`: 상승·하강
-- `Q E`: 회전
+- `Q E` 또는 `← →`: 회전
 - `Space`: 브레이크
 - `Shift`: 부스트
 - `C`: 추적/1인칭 시점 전환
-- `P`: 일시정지
-- `R`: 출발점으로 초기화
+- `P`: 일시정지/재개
+- `R`: 출발점 초기화
 
-## 구성
+탭이 비활성화되거나 창이 포커스를 잃으면 눌린 입력 상태를 즉시 지웁니다. 모바일에서는 화면 하단의 이동·고도 버튼을 사용합니다.
 
-- `dist/index.html`: 게임 화면
-- `dist/style.css`: UI 디자인과 반응형 스타일
-- `dist/app.js`: 월드 렌더링, 비행 조작, 충돌 및 게이트 판정
+## 프로젝트 구조
 
-외부 JavaScript 라이브러리 없이 Canvas 2D로 렌더링하므로, 파일 세 개만으로 실행
-할 수 있습니다.
+```text
+src/
+  app/DroneLabApp.ts             앱 수명주기와 게임 루프
+  game/                          입력, 비행 물리, 카메라, 충돌
+  world/                         Three.js 지역 장면과 지오메트리
+  areas/
+    types.ts                     지역 데이터 공통 인터페이스
+    hongjecheon/
+      config.ts                  기준 좌표, 경계, 출발점, 코스
+      data/                      OSM 정적 스냅샷과 로더
+  ui/                            HUD, 미니맵, 미션 패널
+  utils/                         좌표 변환과 순수 계산 함수
+scripts/import-osm.mjs           Overpass 결과를 지역 스냅샷으로 변환
+dist/                            보존된 Canvas 2D 초기 프로토타입
+```
+
+지역 데이터, 비행 계산, 장면 구성, UI를 분리해 다른 서울 지역을 같은 인터페이스로 추가할 수 있습니다.
+
+## 지역 데이터 구조와 새 지역 추가
+
+`AreaSnapshot`은 `buildings`, `roads`, `paths`, `water`, `bridges`, `parks` 배열로 구성됩니다. 각 형상은 원본 위·경도를 유지하며, 렌더링할 때 `geoToLocal()`로 기준점 중심 미터 좌표에 투영합니다. 동쪽은 `+X`, 북쪽은 `-Z`, 고도는 `+Y`입니다.
+
+새 지역을 추가하려면:
+
+1. `src/areas/<area>/config.ts`에 기준 위·경도, 비행 경계, 출발점, 코스를 정의합니다.
+2. 같은 `AreaSnapshot` 인터페이스의 정적 데이터와 로더를 추가합니다.
+3. `World`에 지역 고유 장면 빌더가 필요하면 공통 지형 빌더와 분리합니다.
+4. 앱 시작 시 선택된 지역의 config와 loader를 주입하도록 지역 선택 UI를 연결합니다.
+
+홍제천 OSM 스냅샷을 갱신할 때는 Overpass JSON을 받은 뒤 아래 변환기를 사용합니다.
+
+```bash
+node scripts/import-osm.mjs /path/to/overpass-result.json
+```
+
+사용한 쿼리 범위와 데이터 구분은 [데이터 출처 문서](docs/data-sources.md)를 참고하세요.
+
+## 알려진 한계
+
+- 지형은 현재 평면이며 실제 표고·하천 제방 높이를 포함하지 않습니다.
+- OSM에 높이가 없는 건물은 식별자 기반의 결정적 추정 높이를 사용합니다.
+- 나무, 착륙 패드, 탐험 링은 비행 경험을 위한 절차적/제작 요소이며 실제 개체 위치가 아닙니다.
+- 교량 충돌은 아직 건물 수준의 정밀 충돌이 아니며, 실제 드론 비행 규제·공역을 재현하지 않습니다.
+- 한 지역을 정적으로 포함하는 MVP라 공간 청크 스트리밍과 건물 메시 병합은 다음 단계입니다.
+
+## 다음 개발 단계
+
+가장 먼저 실제 DEM/표고 데이터를 연결해 하천 제방과 지형 고저를 재현하고, 그다음 청크 로더와 건물 LOD를 추가하는 것이 좋습니다. 이후 실제 공역 정보와 지역 선택 화면을 붙이면 서울 여러 구역으로 안전하게 확장할 수 있습니다.
+
+## 라이선스
+
+애플리케이션 코드의 라이선스는 저장소 정책을 따릅니다. 포함된 지도 데이터는 © OpenStreetMap contributors이며 ODbL 1.0 조건을 따릅니다. 자세한 내용은 [데이터 출처 문서](docs/data-sources.md)와 [OpenStreetMap 저작권 안내](https://www.openstreetmap.org/copyright)를 확인하세요.
