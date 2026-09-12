@@ -130,8 +130,28 @@ export interface RiverbankSegmentConfig {
   endFraction?: number;
   bankWidth?: number;
   bankHeight?: number;
+  /** Half width of the wet channel before the bank profile starts. */
+  waterHalfWidth?: number;
   railing?: boolean;
   materialPreset?: DetailMaterialPreset;
+  dataOrigin: DetailDataOrigin;
+}
+
+export interface TerrainCorridorPoint extends GeoPoint {
+  /** Scene-relative target elevation in metres. */
+  height: number;
+}
+
+/**
+ * A locally surveyed/authored surface that replaces coarse DEM values close to
+ * a linear feature. The target elevation is blended back into the DEM outside
+ * halfWidth so roads and hills do not acquire a hard seam.
+ */
+export interface TerrainCorridorConfig {
+  id: string;
+  points: TerrainCorridorPoint[];
+  halfWidth: number;
+  blendWidth: number;
   dataOrigin: DetailDataOrigin;
 }
 
@@ -170,6 +190,10 @@ export interface LandmarkPlaceholderConfig {
   width: number;
   height: number;
   depth: number;
+  basinWidth?: number;
+  basinDepth?: number;
+  cascadeCount?: number;
+  baseOffset?: number;
   rotation?: number;
   materialPreset?: DetailMaterialPreset;
   dataOrigin: DetailDataOrigin;
@@ -195,6 +219,7 @@ export interface VegetationConfig {
 
 export interface AreaDetailConfig {
   bridgeOverrides?: BridgeVisualOverride[];
+  terrainCorridors?: TerrainCorridorConfig[];
   riverbankSegments?: RiverbankSegmentConfig[];
   riverbankAccesses?: RiverbankAccessConfig[];
   propRules?: PropPlacementRule[];

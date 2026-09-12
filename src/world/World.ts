@@ -105,7 +105,7 @@ export class World {
     this.quality = quality;
     this.detailMaterials = createDetailMaterials(quality);
     this.createPhotoFacadeMaterials(visuals);
-    this.heightField = new TerrainHeightField(elevation, config.origin);
+    this.heightField = new TerrainHeightField(elevation, config.origin, details?.terrainCorridors);
     this.chunks = new SpatialChunkManager(this.scene, chunkSettingsForQuality(quality));
     const detailContext = { origin: config.origin, heightAt: this.groundHeightAt, materials: this.detailMaterials, colliders: this.colliders, quality };
     this.bridgeBuilder = new BridgeBuilder({ ...detailContext, overrides: details?.bridgeOverrides });
@@ -119,8 +119,8 @@ export class World {
       ...checkpoint.position,
       y: this.heightField.sampleHeight(checkpoint.position.x, checkpoint.position.z) + checkpoint.position.y,
     }));
-    this.scene.background = new THREE.Color(0x9dc4ce);
-    this.scene.fog = new THREE.FogExp2(0xa8c8c9, 0.00125);
+    this.scene.background = new THREE.Color(0xb7cbd0);
+    this.scene.fog = new THREE.FogExp2(0xc2d0d0, 0.0009);
     this.addLights(quality);
     this.addTerrain();
     this.addWater();
@@ -144,8 +144,8 @@ export class World {
   }
 
   private addLights(quality: Quality) {
-    const hemisphere = new THREE.HemisphereLight(0xd8f1f4, 0x496351, 2.1);
-    const sun = new THREE.DirectionalLight(0xfff1c9, 2.7);
+    const hemisphere = new THREE.HemisphereLight(0xe2eff1, 0x596d5b, 1.55);
+    const sun = new THREE.DirectionalLight(0xfff4df, 2.15);
     this.sun = sun;
     sun.position.set(180, 250, 120);
     sun.castShadow = quality === 'high';
@@ -153,12 +153,15 @@ export class World {
     sun.shadow.camera.left = -420; sun.shadow.camera.right = 420;
     sun.shadow.camera.top = 420; sun.shadow.camera.bottom = -420;
     sun.shadow.camera.far = 700;
+    sun.shadow.normalBias = 0.035;
+    sun.shadow.radius = 2;
     this.scene.add(hemisphere, sun);
   }
 
   private addTerrain() {
+    const terrainSegments = this.quality === 'high' ? 96 : this.quality === 'medium' ? 72 : 48;
     const ground = new THREE.Mesh(
-      this.heightField.createGeometry(this.config.bounds),
+      this.heightField.createGeometry(this.config.bounds, terrainSegments, terrainSegments),
       new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }),
     );
     ground.receiveShadow = true;
