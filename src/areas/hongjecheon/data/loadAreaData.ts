@@ -1,6 +1,8 @@
-import snapshot from './osm-snapshot.json';
+import snapshot from './generated/base-map.json';
+import minimap from './generated/minimap.json';
 import elevation from './elevation.json';
 import type { AreaSnapshot, ElevationGrid, LoadedAreaData } from '../../types';
+import { HongjecheonChunkSource } from './HongjecheonChunkSource';
 
 function isSnapshot(value: unknown): value is AreaSnapshot {
   if (!value || typeof value !== 'object') return false;
@@ -17,6 +19,7 @@ function isElevationGrid(value: unknown): value is ElevationGrid {
 export async function loadHongjecheonData(): Promise<LoadedAreaData> {
   await Promise.resolve();
   if (!isSnapshot(snapshot)) throw new Error('홍제천 지역 데이터 형식이 올바르지 않습니다.');
+  if (!isSnapshot(minimap)) throw new Error('홍제천 미니맵 데이터 형식이 올바르지 않습니다.');
   if (!isElevationGrid(elevation)) throw new Error('홍제천 표고 데이터 형식이 올바르지 않습니다.');
-  return { snapshot, elevation };
+  return { snapshot, minimap, elevation, chunkSource: new HongjecheonChunkSource() };
 }

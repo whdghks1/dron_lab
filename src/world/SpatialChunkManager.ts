@@ -40,6 +40,12 @@ export class SpatialChunkManager {
     return chunk;
   }
 
+  getOrCreateKey(key: string): SpatialChunk {
+    const [column, row] = key.split(':').map(Number);
+    if (!Number.isFinite(column) || !Number.isFinite(row)) throw new Error(`Invalid chunk key: ${key}`);
+    return this.getOrCreate((column + 0.5) * this.settings.size, (row + 0.5) * this.settings.size);
+  }
+
   update(position: Pick<Vec3, 'x' | 'z'>) {
     const margin = this.settings.size * Math.SQRT2 / 2;
     let active = 0;

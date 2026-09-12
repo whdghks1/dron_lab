@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import type { AreaSnapshot, ElevationGrid, GeoFeature } from '../areas/types';
+import type { AreaChunkSource, AreaSnapshot, ElevationGrid, GeoFeature } from '../areas/types';
 import type { BoxCollider, Vec3 } from '../game/types';
 import { HONGJECHEON_CONFIG } from '../areas/hongjecheon/config';
 import { geoToLocal } from '../utils/geo';
 import { horizontalShape, ribbonGeometry } from './geometry';
 import { TerrainHeightField } from './TerrainHeightField';
 import { SpatialChunkManager, chunkSettingsForQuality, type SpatialChunk } from './SpatialChunkManager';
+import { createFacadeMaterial, createWaterMaterial } from './materials';
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -23,9 +24,16 @@ export class World {
   readonly checkpointPositions: Vec3[];
   readonly chunks: SpatialChunkManager;
   private readonly rotors: THREE.Mesh[] = [];
+  private readonly loadedChunkKeys = new Set<string>();
+  private readonly chunkRequests = new Map<string, Promise<void>>();
+  private readonly facadeMaterial = createFacadeMaterial();
+  private readonly simpleBuildingMaterial = new THREE.MeshStandardMaterial({ color: 0x9da8a1, roughness: 1 });
+  private readonly waterMaterial = createWaterMaterial();
   private sun?: THREE.DirectionalLight;
+  private quality: Quality;
 
-  constructor(private readonly data: AreaSnapshot, elevation: ElevationGrid, quality: Quality) {
+  constructor(private readonly data: AreaSnapshot, elevation: ElevationGrid, quality: Quality, private readonly chunkSource?: AreaChunkSource) {
+    this.quality = quality;
     this.heightField = new TerrainHeightField(elevation, CONFIG.origin);
     this.chunks = new SpatialChunkManager(this.scene, chunkSettingsForQuality(quality));
     this.startPosition = { ...CONFIG.start, y: this.heightField.sampleHeight(CONFIG.start.x, CONFIG.start.z) + CONFIG.start.y };
@@ -38,9 +46,9 @@ export class World {
     this.addLights(quality);
     this.addTerrain();
     this.addWater();
-    this.addRoads();
-    this.addBuildings(quality);
-    this.addBridges();
+    this.addRoads(this.data);
+    this.addBuildings(this.data, quality);
+    this.addBridges(this.data);
     this.addTrees(quality);
     this.addLandingPad();
     this.createDrone();
@@ -68,22 +76,30 @@ export class World {
     );
     ground.receiveShadow = true;
     this.scene.add(ground);
-    for (const park of this.data.parks) {
+    this.addParks(this.data);
+  }
+
+  private addParks(data: AreaSnapshot, targetChunk?: SpatialChunk) {
+    for (const park of data.parks) {
       const points = this.localPoints(park);
-      if (points.length > 2) this.scene.add(new THREE.Mesh(this.drape(horizontalShape(points), 0.05), new THREE.MeshStandardMaterial({ color: 0x678967, roughness: 1 })));
+      if (points.length <= 2) continue;
+      const geometry = this.drape(horizontalShape(points), 0.05);
+      if (targetChunk) geometry.translate(-targetChunk.x, 0, -targetChunk.z);
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x678967, roughness: 1 }));
+      mesh.userData.areaChunk = targetChunk?.key;
+      (targetChunk?.root ?? this.scene).add(mesh);
     }
   }
 
   private addWater() {
-    const material = new THREE.MeshStandardMaterial({ color: 0x4f94a8, roughness: 0.24, metalness: 0.08, transparent: true, opacity: 0.92, side: THREE.DoubleSide });
     const polygonWater = this.data.water.filter((feature) => feature.points.length > 3 && feature.points[0].lat === feature.points.at(-1)?.lat && feature.points[0].lon === feature.points.at(-1)?.lon);
     const geometries: THREE.BufferGeometry[] = polygonWater.map((feature) => this.drape(horizontalShape(this.localPoints(feature)), 0.08));
     this.data.water.filter((feature) => !polygonWater.includes(feature) && feature.kind === 'river').forEach((feature) => geometries.push(ribbonGeometry(this.localPoints(feature, 0.07), 13)));
     const merged = mergeGeometries(geometries);
-    if (merged) this.scene.add(new THREE.Mesh(merged, material));
+    if (merged) this.scene.add(new THREE.Mesh(merged, this.waterMaterial));
   }
 
-  private addRoads() {
+  private addRoads(data: AreaSnapshot, targetChunk?: SpatialChunk) {
     const roadMaterials = {
       major: new THREE.MeshStandardMaterial({ color: 0x677277, roughness: 0.95 }),
       minor: new THREE.MeshStandardMaterial({ color: 0x8c918c, roughness: 0.95 }),
@@ -91,30 +107,30 @@ export class World {
     };
     const majorGeometries: THREE.BufferGeometry[] = [];
     const minorGeometries: THREE.BufferGeometry[] = [];
-    this.data.roads.forEach((feature) => {
+    data.roads.forEach((feature) => {
       const major = ['trunk', 'primary', 'secondary', 'tertiary'].includes(feature.kind);
       const width = major ? (feature.kind === 'trunk' ? 12 : 8) : feature.kind === 'service' ? 3.2 : 5;
       (major ? majorGeometries : minorGeometries).push(ribbonGeometry(this.localPoints(feature, 0.11), width));
     });
     const pathGeometries: THREE.BufferGeometry[] = [];
-    this.data.paths.forEach((feature) => {
+    data.paths.forEach((feature) => {
       const width = feature.kind === 'cycleway' ? 3.2 : 2;
       pathGeometries.push(ribbonGeometry(this.localPoints(feature, 0.14), width));
     });
     ([[majorGeometries, roadMaterials.major], [minorGeometries, roadMaterials.minor], [pathGeometries, roadMaterials.path]] as const).forEach(([geometries, material]) => {
       const merged = mergeGeometries(geometries);
       if (!merged) return;
+      if (targetChunk) merged.translate(-targetChunk.x, 0, -targetChunk.z);
       const mesh = new THREE.Mesh(merged, material);
       mesh.receiveShadow = true;
-      this.scene.add(mesh);
+      mesh.userData.areaChunk = targetChunk?.key;
+      (targetChunk?.root ?? this.scene).add(mesh);
     });
   }
 
-  private addBuildings(quality: Quality) {
-    const detailedMaterial = new THREE.MeshStandardMaterial({ color: 0xb5bbb2, roughness: 0.88 });
-    const simpleMaterial = new THREE.MeshStandardMaterial({ color: 0x9da8a1, roughness: 1 });
+  private addBuildings(data: AreaSnapshot, quality: Quality) {
     const builders = new Map<string, { chunk: SpatialChunk; detailed: THREE.BufferGeometry[]; simple: THREE.BufferGeometry[] }>();
-    this.data.buildings.forEach((feature) => {
+    data.buildings.forEach((feature) => {
       const points = this.localPoints(feature);
       if (points.length < 3) return;
       const centerX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
@@ -149,10 +165,10 @@ export class World {
       const detailedGeometry = mergeGeometries(detailed);
       const simpleGeometry = mergeGeometries(simple);
       if (!detailedGeometry || !simpleGeometry) return;
-      const detailedMesh = new THREE.Mesh(detailedGeometry, detailedMaterial);
+      const detailedMesh = new THREE.Mesh(detailedGeometry, this.facadeMaterial);
       detailedMesh.castShadow = quality === 'high';
       detailedMesh.receiveShadow = true;
-      const simpleMesh = new THREE.Mesh(simpleGeometry, simpleMaterial);
+      const simpleMesh = new THREE.Mesh(simpleGeometry, this.simpleBuildingMaterial);
       simpleMesh.receiveShadow = true;
       const lod = new THREE.LOD();
       lod.name = `building-lod-${chunk.key}`;
@@ -162,19 +178,21 @@ export class World {
     });
   }
 
-  private addBridges() {
+  private addBridges(data: AreaSnapshot, targetChunk?: SpatialChunk) {
     const material = new THREE.MeshStandardMaterial({ color: 0x4f5c60, roughness: 0.8 });
     const geometries: THREE.BufferGeometry[] = [];
-    this.data.bridges.forEach((feature) => {
+    data.bridges.forEach((feature) => {
       const y = feature.kind === 'trunk' ? 13 : 3.8;
       const width = feature.kind === 'trunk' ? 13 : ['secondary', 'residential'].includes(feature.kind) ? 8 : 3;
       geometries.push(ribbonGeometry(this.localPoints(feature, y), width));
     });
     const merged = mergeGeometries(geometries);
     if (!merged) return;
+    if (targetChunk) merged.translate(-targetChunk.x, 0, -targetChunk.z);
     const mesh = new THREE.Mesh(merged, material);
     mesh.castShadow = true;
-    this.scene.add(mesh);
+    mesh.userData.areaChunk = targetChunk?.key;
+    (targetChunk?.root ?? this.scene).add(mesh);
   }
 
   private addTrees(quality: Quality) {
@@ -298,13 +316,24 @@ export class World {
     this.drone.position.set(position.x, position.y, position.z);
     this.drone.rotation.set(Math.max(-0.22, Math.min(0.22, velocity.z * 0.012)), yaw, Math.max(-0.25, Math.min(0.25, -velocity.x * 0.012)));
     this.rotors.forEach((rotor, index) => { rotor.rotation.y = elapsed * (index % 2 ? -20 : 20); });
+    if (this.waterMaterial.map) {
+      this.waterMaterial.map.offset.x = elapsed * 0.004;
+      this.waterMaterial.map.offset.y = Math.sin(elapsed * 0.12) * 0.025;
+    }
+  }
+
+  async prepare(position: Pick<Vec3, 'x' | 'z'>) {
+    await this.ensureChunks(position);
+    this.chunks.update(position);
   }
 
   updateStreaming(position: Pick<Vec3, 'x' | 'z'>) {
     this.chunks.update(position);
+    void this.ensureChunks(position).catch((error: unknown) => console.error('지역 청크 로딩 실패', error));
   }
 
   setQuality(quality: Quality) {
+    this.quality = quality;
     const settings = chunkSettingsForQuality(quality);
     if (this.sun) this.sun.castShadow = quality === 'high';
     this.chunks.configure(settings);
@@ -316,6 +345,32 @@ export class World {
       });
     }
     this.chunks.update(this.drone.position);
+  }
+
+  get loadedChunkCount() { return this.loadedChunkKeys.size; }
+
+  private async ensureChunks(position: Pick<Vec3, 'x' | 'z'>) {
+    if (!this.chunkSource) return;
+    const keys = this.chunkSource.keysAround(position.x, position.z, this.chunks.settings.loadRadius);
+    await Promise.all(keys.map((key) => this.loadChunk(key)));
+  }
+
+  private loadChunk(key: string): Promise<void> {
+    if (!this.chunkSource || this.loadedChunkKeys.has(key)) return Promise.resolve();
+    const existing = this.chunkRequests.get(key);
+    if (existing) return existing;
+    const request = this.chunkSource.load(key)
+      .then((data) => {
+        const chunk = this.chunks.getOrCreateKey(key);
+        this.addParks(data, chunk);
+        this.addRoads(data, chunk);
+        this.addBuildings(data, this.quality);
+        this.addBridges(data, chunk);
+        this.loadedChunkKeys.add(key);
+      })
+      .finally(() => this.chunkRequests.delete(key));
+    this.chunkRequests.set(key, request);
+    return request;
   }
 
   setCheckpointState(active: number, visible: boolean) {

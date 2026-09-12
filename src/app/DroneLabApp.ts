@@ -39,14 +39,18 @@ export class DroneLabApp {
     this.renderer.shadowMap.enabled = this.quality === 'high';
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.camera = new THREE.PerspectiveCamera(67, 1, 0.1, 1800);
-    this.world = new World(data.snapshot, data.elevation, this.quality);
+    this.world = new World(data.snapshot, data.elevation, this.quality, data.chunkSource);
     this.cameraController = new CameraController(this.camera);
     this.collision = new CollisionSystem(this.world.colliders, DEFAULT_FLIGHT_CONFIG.collisionRadius);
-    this.minimap = new MiniMap(document.getElementById('map') as HTMLCanvasElement, data.snapshot);
+    this.minimap = new MiniMap(document.getElementById('map') as HTMLCanvasElement, data.minimap);
     this.mission = new MissionPanel(() => this.reset(false));
     this.bindUi();
     this.resize();
     this.reset(false);
+  }
+
+  async prepare() {
+    await this.world.prepare(this.flight.position);
   }
 
   start() {

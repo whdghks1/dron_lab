@@ -13,6 +13,7 @@ async function bootstrap() {
     if (!canvas) throw new Error('3D Canvas를 찾을 수 없습니다.');
     const data = await loadHongjecheonData();
     const app = new DroneLabApp(canvas, data);
+    await app.prepare();
     app.start();
     requestAnimationFrame(() => loading.classList.add('hidden'));
   } catch (reason) {

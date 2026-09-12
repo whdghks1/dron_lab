@@ -36,7 +36,22 @@ export interface ElevationGrid {
 
 export interface LoadedAreaData {
   snapshot: AreaSnapshot;
+  minimap: AreaSnapshot;
   elevation: ElevationGrid;
+  chunkSource: AreaChunkSource;
+}
+
+export interface AreaChunkManifest {
+  key: string;
+  file: string;
+  x: number;
+  z: number;
+}
+
+export interface AreaChunkSource {
+  readonly chunkSize: number;
+  keysAround(x: number, z: number, radius: number): string[];
+  load(key: string): Promise<AreaSnapshot>;
 }
 
 export interface CheckpointConfig {
