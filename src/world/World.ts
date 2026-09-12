@@ -6,6 +6,7 @@ import { HONGJECHEON_CONFIG } from '../areas/hongjecheon/config';
 import { geoToLocal } from '../utils/geo';
 import { horizontalShape, ribbonGeometry } from './geometry';
 import { TerrainHeightField } from './TerrainHeightField';
+import { SpatialChunkManager, chunkSettingsForQuality, type SpatialChunk } from './SpatialChunkManager';
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -20,11 +21,13 @@ export class World {
   readonly heightField: TerrainHeightField;
   readonly startPosition: Vec3;
   readonly checkpointPositions: Vec3[];
-  private trees?: THREE.InstancedMesh;
+  readonly chunks: SpatialChunkManager;
   private readonly rotors: THREE.Mesh[] = [];
+  private sun?: THREE.DirectionalLight;
 
   constructor(private readonly data: AreaSnapshot, elevation: ElevationGrid, quality: Quality) {
     this.heightField = new TerrainHeightField(elevation, CONFIG.origin);
+    this.chunks = new SpatialChunkManager(this.scene, chunkSettingsForQuality(quality));
     this.startPosition = { ...CONFIG.start, y: this.heightField.sampleHeight(CONFIG.start.x, CONFIG.start.z) + CONFIG.start.y };
     this.checkpointPositions = CONFIG.checkpoints.map((checkpoint) => ({
       ...checkpoint.position,
@@ -42,19 +45,19 @@ export class World {
     this.addLandingPad();
     this.createDrone();
     this.createCheckpoints();
+    this.chunks.update(this.startPosition);
   }
 
   private addLights(quality: Quality) {
     const hemisphere = new THREE.HemisphereLight(0xd8f1f4, 0x496351, 2.1);
     const sun = new THREE.DirectionalLight(0xfff1c9, 2.7);
+    this.sun = sun;
     sun.position.set(180, 250, 120);
     sun.castShadow = quality === 'high';
-    if (sun.castShadow) {
-      sun.shadow.mapSize.set(2048, 2048);
-      sun.shadow.camera.left = -420; sun.shadow.camera.right = 420;
-      sun.shadow.camera.top = 420; sun.shadow.camera.bottom = -420;
-      sun.shadow.camera.far = 700;
-    }
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -420; sun.shadow.camera.right = 420;
+    sun.shadow.camera.top = 420; sun.shadow.camera.bottom = -420;
+    sun.shadow.camera.far = 700;
     this.scene.add(hemisphere, sun);
   }
 
@@ -108,32 +111,55 @@ export class World {
   }
 
   private addBuildings(quality: Quality) {
-    const material = new THREE.MeshStandardMaterial({ color: 0xb5bbb2, roughness: 0.88, vertexColors: false });
-    const geometries: THREE.BufferGeometry[] = [];
+    const detailedMaterial = new THREE.MeshStandardMaterial({ color: 0xb5bbb2, roughness: 0.88 });
+    const simpleMaterial = new THREE.MeshStandardMaterial({ color: 0x9da8a1, roughness: 1 });
+    const builders = new Map<string, { chunk: SpatialChunk; detailed: THREE.BufferGeometry[]; simple: THREE.BufferGeometry[] }>();
     this.data.buildings.forEach((feature) => {
       const points = this.localPoints(feature);
       if (points.length < 3) return;
+      const centerX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+      const centerZ = points.reduce((sum, point) => sum + point.z, 0) / points.length;
+      const chunk = this.chunks.getOrCreate(centerX, centerZ);
+      let builder = builders.get(chunk.key);
+      if (!builder) {
+        builder = { chunk, detailed: [], simple: [] };
+        builders.set(chunk.key, builder);
+      }
       const shape = new THREE.Shape();
       points.forEach((point, index) => index === 0 ? shape.moveTo(point.x, -point.z) : shape.lineTo(point.x, -point.z));
       shape.closePath();
       const height = Math.min(65, Math.max(5, feature.height ?? 7 + seeded(feature.id) * 24));
       const geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
       geometry.rotateX(-Math.PI / 2);
-      const centerX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
-      const centerZ = points.reduce((sum, point) => sum + point.z, 0) / points.length;
       const baseHeight = this.heightField.sampleHeight(centerX, centerZ);
       geometry.translate(0, baseHeight, 0);
       geometry.computeBoundingBox();
-      geometries.push(geometry);
       const box = geometry.boundingBox!;
       this.colliders.push({ minX: box.min.x, maxX: box.max.x, minY: baseHeight, maxY: baseHeight + height, minZ: box.min.z, maxZ: box.max.z, label: feature.name || '주변 건물' });
+      geometry.translate(-chunk.x, 0, -chunk.z);
+      builder.detailed.push(geometry);
+
+      const width = Math.max(1, box.max.x - box.min.x);
+      const depth = Math.max(1, box.max.z - box.min.z);
+      const simplified = new THREE.BoxGeometry(width, height, depth);
+      simplified.translate(centerX - chunk.x, baseHeight + height / 2, centerZ - chunk.z);
+      builder.simple.push(simplified);
     });
-    const merged = mergeGeometries(geometries);
-    if (!merged) return;
-    const mesh = new THREE.Mesh(merged, material);
-    mesh.castShadow = quality === 'high';
-    mesh.receiveShadow = true;
-    this.scene.add(mesh);
+    builders.forEach(({ chunk, detailed, simple }) => {
+      const detailedGeometry = mergeGeometries(detailed);
+      const simpleGeometry = mergeGeometries(simple);
+      if (!detailedGeometry || !simpleGeometry) return;
+      const detailedMesh = new THREE.Mesh(detailedGeometry, detailedMaterial);
+      detailedMesh.castShadow = quality === 'high';
+      detailedMesh.receiveShadow = true;
+      const simpleMesh = new THREE.Mesh(simpleGeometry, simpleMaterial);
+      simpleMesh.receiveShadow = true;
+      const lod = new THREE.LOD();
+      lod.name = `building-lod-${chunk.key}`;
+      lod.addLevel(detailedMesh, 0);
+      lod.addLevel(simpleMesh, this.chunks.settings.lodDistance);
+      chunk.root.add(lod);
+    });
   }
 
   private addBridges() {
@@ -153,22 +179,52 @@ export class World {
 
   private addTrees(quality: Quality) {
     const count = quality === 'low' ? 70 : quality === 'medium' ? 140 : 220;
-    const crown = new THREE.ConeGeometry(1.6, 4.5, 7);
-    crown.translate(0, 3.25, 0);
-    const material = new THREE.MeshStandardMaterial({ color: 0x3f7655, roughness: 1 });
-    this.trees = new THREE.InstancedMesh(crown, material, count);
-    const matrix = new THREE.Matrix4();
+    const placements = new Map<string, { chunk: SpatialChunk; trees: Array<{ x: number; y: number; z: number; scale: number }> }>();
     for (let index = 0; index < count; index += 1) {
       const angle = seeded(index + 19) * Math.PI * 2;
       const radius = 55 + seeded(index + 83) * 410;
       const x = Math.cos(angle) * radius + Math.sin(index) * 35;
       const z = Math.sin(angle) * radius;
       const scale = 0.75 + seeded(index + 191) * 0.65;
-      matrix.compose(new THREE.Vector3(x, this.heightField.sampleHeight(x, z), z), new THREE.Quaternion(), new THREE.Vector3(scale, scale, scale));
-      this.trees.setMatrixAt(index, matrix);
+      const chunk = this.chunks.getOrCreate(x, z);
+      let placement = placements.get(chunk.key);
+      if (!placement) {
+        placement = { chunk, trees: [] };
+        placements.set(chunk.key, placement);
+      }
+      placement.trees.push({ x: x - chunk.x, y: this.heightField.sampleHeight(x, z), z: z - chunk.z, scale });
     }
-    this.trees.castShadow = quality === 'high';
-    this.scene.add(this.trees);
+
+    const trunk = new THREE.CylinderGeometry(0.28, 0.38, 3.2, 6);
+    trunk.translate(0, 1.6, 0);
+    const crown = new THREE.ConeGeometry(1.6, 4.5, 7);
+    crown.translate(0, 3.25, 0);
+    const farCrown = new THREE.ConeGeometry(1.45, 5.2, 4);
+    farCrown.translate(0, 2.6, 0);
+    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x635d49, roughness: 1 });
+    const crownMaterial = new THREE.MeshStandardMaterial({ color: 0x3f7655, roughness: 1 });
+    const farMaterial = new THREE.MeshStandardMaterial({ color: 0x53755b, roughness: 1 });
+    placements.forEach(({ chunk, trees }) => {
+      const nearGroup = new THREE.Group();
+      const trunks = new THREE.InstancedMesh(trunk, trunkMaterial, trees.length);
+      const crowns = new THREE.InstancedMesh(crown, crownMaterial, trees.length);
+      const farCrowns = new THREE.InstancedMesh(farCrown, farMaterial, trees.length);
+      const matrix = new THREE.Matrix4();
+      trees.forEach((tree, index) => {
+        matrix.compose(new THREE.Vector3(tree.x, tree.y, tree.z), new THREE.Quaternion(), new THREE.Vector3(tree.scale, tree.scale, tree.scale));
+        trunks.setMatrixAt(index, matrix);
+        crowns.setMatrixAt(index, matrix);
+        farCrowns.setMatrixAt(index, matrix);
+      });
+      trunks.castShadow = quality === 'high';
+      crowns.castShadow = quality === 'high';
+      nearGroup.add(trunks, crowns);
+      const lod = new THREE.LOD();
+      lod.name = `vegetation-lod-${chunk.key}`;
+      lod.addLevel(nearGroup, 0);
+      lod.addLevel(farCrowns, this.chunks.settings.lodDistance * 0.72);
+      chunk.root.add(lod);
+    });
   }
 
   private addLandingPad() {
@@ -242,6 +298,24 @@ export class World {
     this.drone.position.set(position.x, position.y, position.z);
     this.drone.rotation.set(Math.max(-0.22, Math.min(0.22, velocity.z * 0.012)), yaw, Math.max(-0.25, Math.min(0.25, -velocity.x * 0.012)));
     this.rotors.forEach((rotor, index) => { rotor.rotation.y = elapsed * (index % 2 ? -20 : 20); });
+  }
+
+  updateStreaming(position: Pick<Vec3, 'x' | 'z'>) {
+    this.chunks.update(position);
+  }
+
+  setQuality(quality: Quality) {
+    const settings = chunkSettingsForQuality(quality);
+    if (this.sun) this.sun.castShadow = quality === 'high';
+    this.chunks.configure(settings);
+    for (const chunk of this.chunks.values()) {
+      chunk.root.traverse((object: THREE.Object3D) => {
+        if (object instanceof THREE.Mesh) object.castShadow = quality === 'high';
+        if (!(object instanceof THREE.LOD) || object.levels.length < 2) return;
+        object.levels[1].distance = object.name.startsWith('vegetation') ? settings.lodDistance * 0.72 : settings.lodDistance;
+      });
+    }
+    this.chunks.update(this.drone.position);
   }
 
   setCheckpointState(active: number, visible: boolean) {

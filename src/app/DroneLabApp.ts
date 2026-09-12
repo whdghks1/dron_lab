@@ -60,6 +60,7 @@ export class DroneLabApp {
     if (this.running) this.update(dt);
     this.cameraController.update(this.flight, dt);
     this.world.updateDrone(this.flight.position, this.flight.yaw, this.flight.velocity, this.flight.elapsed);
+    this.world.updateStreaming(this.flight.position);
     this.renderer.render(this.world.scene, this.camera);
     this.hud.update(this.flight, this.crashed ? 'COLLISION' : this.running ? 'IN FLIGHT' : this.started ? 'PAUSED' : 'STANDBY', this.world.groundHeightAt(this.flight.position.x, this.flight.position.z));
     this.hud.ambient(this.mission.mode === 'explore' ? `NEXT PLACE ${Math.min(this.checkpoint + 1, config.checkpoints.length)} / ${config.checkpoints.length}` : 'FREE FLIGHT · HONGJECHEON', this.flight.elapsed);
@@ -178,6 +179,7 @@ export class DroneLabApp {
     localStorage.setItem('drone-lab-quality', this.quality);
     this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.shadowMap.enabled = this.quality === 'high';
+    this.world.setQuality(this.quality);
     document.querySelector<HTMLButtonElement>('#quality b')!.textContent = this.quality.toUpperCase();
     this.hud.notify(`그래픽 품질 · ${this.quality.toUpperCase()}`, this.flight.elapsed);
   }
