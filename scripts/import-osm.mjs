@@ -32,6 +32,10 @@ function feature(id, geometry, tags = {}) {
     buildingMaterial: tags['building:material'] || undefined,
     facadeColor: tags['building:colour'] || undefined,
     roofColor: tags['roof:colour'] || undefined,
+    width: optionalNumber(tags.width),
+    lanes: optionalNumber(tags.lanes),
+    surface: tags.surface || undefined,
+    sidewalk: tags.sidewalk || undefined,
     tags,
   };
 }

@@ -20,7 +20,21 @@ describe('Hongjecheon world', () => {
 
   it('builds the OSM building collision field', () => {
     assert.equal(world.colliders.length, snapshot.buildings.length + bridgeSegmentCount);
+    assert.equal(world.colliders.filter((collider) => collider.footprint).length, snapshot.buildings.length);
     assert.ok(world.scene.children.length > 10);
+  });
+
+  it('builds quality-scaled road surfaces, sidewalks, and markings', () => {
+    const objects: THREE.Object3D[] = [];
+    world.scene.traverse((object) => objects.push(object));
+    assert.ok(objects.some((object) => object.name === 'road-surface-major'));
+    const details = objects.filter((object) => object.name.startsWith('quality-detail-road-'));
+    assert.ok(details.some((object) => object.name === 'quality-detail-road-sidewalks'));
+    assert.ok(details.some((object) => object.name === 'quality-detail-road-center-dashes'));
+    assert.ok(details.every((object) => object.visible === false));
+    world.setQuality('medium');
+    assert.ok(details.every((object) => object.visible === true));
+    world.setQuality('low');
   });
 
   it('includes multipolygon relation building parts that were previously omitted', () => {

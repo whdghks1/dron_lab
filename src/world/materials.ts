@@ -69,6 +69,33 @@ export function createWaterMaterial(): THREE.MeshPhysicalMaterial {
   });
 }
 
+export interface RoadMaterialSet {
+  major: THREE.MeshStandardMaterial;
+  minor: THREE.MeshStandardMaterial;
+  path: THREE.MeshStandardMaterial;
+  sidewalk: THREE.MeshStandardMaterial;
+  edge: THREE.MeshBasicMaterial;
+  center: THREE.MeshBasicMaterial;
+  cycleEdge: THREE.MeshBasicMaterial;
+}
+
+export function createRoadMaterials(): RoadMaterialSet {
+  const asphalt = patternedTexture([83, 91, 94], (x, y) => ((x * 11 + y * 17) % 13) - 6);
+  const localRoad = patternedTexture([111, 116, 114], (x, y) => ((x * 7 + y * 5) % 9) - 4);
+  const walking = patternedTexture([174, 169, 146], (x, y) => (x % 8 === 0 || y % 8 === 0 ? -13 : 2));
+  const sidewalk = patternedTexture([155, 151, 139], (x, y) => (x % 8 === 0 || y % 6 === 0 ? -12 : 3));
+  [asphalt, localRoad, walking, sidewalk].forEach((texture) => texture.repeat.set(0.12, 0.12));
+  return {
+    major: new THREE.MeshStandardMaterial({ color: 0x7d8588, map: asphalt, roughness: 0.96 }),
+    minor: new THREE.MeshStandardMaterial({ color: 0xa1a5a1, map: localRoad, roughness: 0.98 }),
+    path: new THREE.MeshStandardMaterial({ color: 0xd0c9aa, map: walking, roughness: 1 }),
+    sidewalk: new THREE.MeshStandardMaterial({ color: 0xbeb9aa, map: sidewalk, roughness: 1 }),
+    edge: new THREE.MeshBasicMaterial({ color: 0xe8e7dc }),
+    center: new THREE.MeshBasicMaterial({ color: 0xe6c65a }),
+    cycleEdge: new THREE.MeshBasicMaterial({ color: 0xd9eee7 }),
+  };
+}
+
 function patternedTexture(
   base: [number, number, number],
   pattern: (x: number, y: number) => number,

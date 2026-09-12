@@ -31,4 +31,11 @@ export interface FlightState {
 }
 
 export interface Bounds { minX: number; maxX: number; minZ: number; maxZ: number }
-export interface BoxCollider extends Bounds { minY: number; maxY: number; label?: string }
+export interface ColliderPoint { x: number; z: number }
+export interface BoxCollider extends Bounds {
+  minY: number;
+  maxY: number;
+  label?: string;
+  /** Optional exact horizontal footprint used after the broad-phase bounds check. */
+  footprint?: ColliderPoint[];
+}

@@ -14,6 +14,10 @@ export interface GeoFeature {
   buildingMaterial?: string;
   facadeColor?: string;
   roofColor?: string;
+  width?: number;
+  lanes?: number;
+  surface?: string;
+  sidewalk?: string;
 }
 
 export interface AreaSnapshot {

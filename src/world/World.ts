@@ -2,17 +2,19 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { AreaChunkSource, AreaConfig, AreaDetailConfig, AreaSnapshot, AreaVisualConfig, ElevationGrid, FacadePhotoSide, GeoFeature } from '../areas/types';
 import type { BoxCollider, Vec3 } from '../game/types';
+import { colliderIntersectsSphere } from '../game/CollisionSystem';
 import { geoToLocal } from '../utils/geo';
 import { assignExtrudeSideMaterialGroups, horizontalShape, ribbonGeometry } from './geometry';
 import { TerrainHeightField } from './TerrainHeightField';
 import { SpatialChunkManager, chunkSettingsForQuality, type SpatialChunk } from './SpatialChunkManager';
-import { createDetailMaterials, createFacadeMaterial, createWaterMaterial, setDetailMaterialQuality } from './materials';
+import { createDetailMaterials, createFacadeMaterial, createRoadMaterials, createWaterMaterial, setDetailMaterialQuality } from './materials';
 import { BridgeBuilder } from './details/BridgeBuilder';
 import { RiverbankBuilder } from './details/RiverbankBuilder';
 import { PropPlacementSystem } from './details/PropPlacementSystem';
 import { VegetationSystem } from './details/VegetationSystem';
 import { LandmarkLoader } from './details/LandmarkLoader';
 import { assignDirectionalFacadeGroups, directionalFacadeMaterialIndices } from './details/FacadeSystem';
+import { RoadBuilder } from './details/RoadBuilder';
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -73,9 +75,7 @@ export class World {
   private readonly simpleBuildingMaterial = new THREE.MeshStandardMaterial({ color: 0x9da8a1, roughness: 1 });
   private readonly waterMaterial = createWaterMaterial();
   private readonly parkMaterial = new THREE.MeshStandardMaterial({ color: 0x678967, roughness: 1 });
-  private readonly roadMajorMaterial = new THREE.MeshStandardMaterial({ color: 0x677277, roughness: 0.95 });
-  private readonly roadMinorMaterial = new THREE.MeshStandardMaterial({ color: 0x8c918c, roughness: 0.95 });
-  private readonly pathMaterial = new THREE.MeshStandardMaterial({ color: 0xc3bfa6, roughness: 1 });
+  private readonly roadMaterials = createRoadMaterials();
   private readonly photoFacadeMaterials = new Map<number, PhotoFacadeMaterialSet>();
   private readonly detailMaterials: ReturnType<typeof createDetailMaterials>;
   private readonly bridgeBuilder: BridgeBuilder;
@@ -83,6 +83,7 @@ export class World {
   private readonly propPlacement: PropPlacementSystem;
   private readonly vegetation: VegetationSystem;
   private readonly landmarkLoader: LandmarkLoader;
+  private readonly roadBuilder: RoadBuilder;
   private readonly flightTrail = new THREE.Line(
     new THREE.BufferGeometry(),
     new THREE.LineBasicMaterial({ color: 0xcafa79, transparent: true, opacity: 0.62 }),
@@ -112,6 +113,7 @@ export class World {
     this.propPlacement = new PropPlacementSystem({ ...detailContext, rules: details?.propRules });
     this.vegetation = new VegetationSystem({ origin: config.origin, bounds: config.bounds, heightAt: this.groundHeightAt, config: details?.vegetation, quality, chunkSize: this.chunks.settings.size, water: data.water });
     this.landmarkLoader = new LandmarkLoader(detailContext);
+    this.roadBuilder = new RoadBuilder({ origin: config.origin, heightAt: this.groundHeightAt, materials: this.roadMaterials, quality });
     this.startPosition = { ...config.start, y: this.heightField.sampleHeight(config.start.x, config.start.z) + config.start.y };
     this.checkpointPositions = config.checkpoints.map((checkpoint) => ({
       ...checkpoint.position,
@@ -123,7 +125,7 @@ export class World {
     this.addTerrain();
     this.addWater();
     this.riverbankBuilder.build(this.data.water, this.scene);
-    this.addRoads(this.data);
+    this.roadBuilder.build(this.data, this.scene);
     this.addBuildings(this.data, quality);
     this.bridgeBuilder.build(this.data.bridges, this.scene);
     this.propPlacement.build(this.data, this.scene);
@@ -183,37 +185,6 @@ export class World {
     if (geometries.length === 0) return;
     const merged = mergeGeometries(geometries);
     if (merged) this.scene.add(new THREE.Mesh(merged, this.waterMaterial));
-  }
-
-  private addRoads(data: AreaSnapshot, targetChunk?: SpatialChunk, targetRoot: THREE.Object3D = targetChunk?.root ?? this.scene) {
-    const roadMaterials = {
-      major: this.roadMajorMaterial,
-      minor: this.roadMinorMaterial,
-      path: this.pathMaterial,
-    };
-    const majorGeometries: THREE.BufferGeometry[] = [];
-    const minorGeometries: THREE.BufferGeometry[] = [];
-    const bridgeIds = new Set(data.bridges.map((feature) => feature.id));
-    data.roads.filter((feature) => !bridgeIds.has(feature.id)).forEach((feature) => {
-      const major = ['trunk', 'primary', 'secondary', 'tertiary'].includes(feature.kind);
-      const width = major ? (feature.kind === 'trunk' ? 12 : 8) : feature.kind === 'service' ? 3.2 : 5;
-      (major ? majorGeometries : minorGeometries).push(ribbonGeometry(this.localPoints(feature, 0.11), width));
-    });
-    const pathGeometries: THREE.BufferGeometry[] = [];
-    data.paths.filter((feature) => !bridgeIds.has(feature.id)).forEach((feature) => {
-      const width = feature.kind === 'cycleway' ? 3.2 : 2;
-      pathGeometries.push(ribbonGeometry(this.localPoints(feature, 0.14), width));
-    });
-    ([[majorGeometries, roadMaterials.major], [minorGeometries, roadMaterials.minor], [pathGeometries, roadMaterials.path]] as const).forEach(([geometries, material]) => {
-      if (geometries.length === 0) return;
-      const merged = mergeGeometries(geometries);
-      if (!merged) return;
-      if (targetChunk) merged.translate(-targetChunk.x, 0, -targetChunk.z);
-      const mesh = new THREE.Mesh(merged, material);
-      mesh.receiveShadow = true;
-      mesh.userData.areaChunk = targetChunk?.key;
-      targetRoot.add(mesh);
-    });
   }
 
   private createPhotoFacadeMaterials(visuals?: AreaVisualConfig) {
@@ -336,7 +307,14 @@ export class World {
       geometry.translate(0, baseHeight + minHeight, 0);
       geometry.computeBoundingBox();
       const box = geometry.boundingBox!;
-      this.colliders.push({ minX: box.min.x, maxX: box.max.x, minY: baseHeight + minHeight, maxY: baseHeight + height, minZ: box.min.z, maxZ: box.max.z, label: feature.name || '주변 건물' });
+      const footprint = points.length > 3 && points[0].distanceToSquared(points.at(-1)!) < 1e-8 ? points.slice(0, -1) : points;
+      this.colliders.push({
+        minX: box.min.x, maxX: box.max.x,
+        minY: baseHeight + minHeight, maxY: baseHeight + height,
+        minZ: box.min.z, maxZ: box.max.z,
+        footprint: footprint.map((point) => ({ x: point.x, z: point.z })),
+        label: feature.name || '주변 건물',
+      });
       geometry.translate(-chunk.x, 0, -chunk.z);
       const photoSet = this.photoFacadeMaterials.get(feature.id);
       if (photoSet) {
@@ -355,8 +333,9 @@ export class World {
       this.addBuildingDetails(feature, points, builder.rooftopBoxes, builder.facadeBoxes, builder.tanks, builder.pyramidRoofs, builder.gableRoofs, builder.roundRoofs, {
         centerX, centerZ, width, depth, baseHeight, height, roofHeight, roofShape, wallTop: baseHeight + minHeight + wallHeight, chunkX: chunk.x, chunkZ: chunk.z,
       });
-      const simplified = new THREE.BoxGeometry(width, wallHeight + roofHeight, depth);
-      simplified.translate(centerX - chunk.x, baseHeight + minHeight + (wallHeight + roofHeight) / 2, centerZ - chunk.z);
+      const simplified = new THREE.ExtrudeGeometry(shape, { depth: wallHeight + roofHeight, bevelEnabled: false });
+      simplified.rotateX(-Math.PI / 2);
+      simplified.translate(-chunk.x, baseHeight + minHeight, -chunk.z);
       builder.simple.push(simplified);
     });
     builders.forEach(({ chunk, root, detailed, photos, rooftopBoxes, facadeBoxes, tanks, pyramidRoofs, gableRoofs, roundRoofs, simple }) => {
@@ -590,11 +569,7 @@ export class World {
   private ensureCheckpointClearance() {
     this.checkpointPositions.forEach((checkpoint, checkpointIndex) => {
       for (let attempt = 0; attempt < 4; attempt += 1) {
-        const collider = this.colliders.find((box) =>
-          checkpoint.x + 0.8 > box.minX && checkpoint.x - 0.8 < box.maxX &&
-          checkpoint.z + 0.8 > box.minZ && checkpoint.z - 0.8 < box.maxZ &&
-          checkpoint.y + 0.8 > box.minY && checkpoint.y - 0.8 < box.maxY,
-        );
+        const collider = this.colliders.find((box) => colliderIntersectsSphere(box, checkpoint, 0.8));
         if (!collider) break;
         checkpoint.y = collider.maxY + 1.8;
       }
@@ -657,6 +632,7 @@ export class World {
     this.propPlacement.setQuality(quality);
     this.vegetation.setQuality(quality);
     this.landmarkLoader.setQuality(quality);
+    this.roadBuilder.setQuality(quality);
     setDetailMaterialQuality(this.detailMaterials, quality);
     const settings = chunkSettingsForQuality(quality);
     if (this.sun) this.sun.castShadow = quality === 'high';
@@ -721,7 +697,7 @@ export class World {
         chunk.root.add(root);
         const colliderStart = this.colliders.length;
         this.addParks(data, chunk, root);
-        this.addRoads(data, chunk, root);
+        this.roadBuilder.build(data, root, { x: chunk.x, z: chunk.z });
         this.addBuildings(data, this.quality, new Map([[key, root]]));
         this.bridgeBuilder.build(data.bridges, root, { x: chunk.x, z: chunk.z });
         this.propPlacement.build(data, root, { x: chunk.x, z: chunk.z });
