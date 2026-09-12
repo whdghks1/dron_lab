@@ -7,6 +7,13 @@ export interface GeoFeature {
   kind: string;
   points: GeoPoint[];
   height?: number;
+  levels?: number;
+  minHeight?: number;
+  roofHeight?: number;
+  roofShape?: string;
+  buildingMaterial?: string;
+  facadeColor?: string;
+  roofColor?: string;
 }
 
 export interface AreaSnapshot {

@@ -5,10 +5,11 @@
 - 출처: © OpenStreetMap contributors
 - 라이선스: Open Data Commons Open Database License 1.0 (ODbL)
 - 원본 안내: https://www.openstreetmap.org/copyright
-- 획득 방식: Overpass API의 `way` 형상과 태그
+- 획득 방식: Overpass API의 `way` 형상과 건물 multipolygon `relation`의 닫힌 outer member
 - 쿼리 시각: `2026-09-12T07:57:01Z` (스냅샷 메타데이터 기준)
 - 쿼리 bbox: 남위도 `37.5762`, 서경도 `126.9320`, 북위도 `37.5850`, 동경도 `126.9430`
 - 포함 항목: `waterway`, `natural=water`, `water`, `highway`, `bridge`, `building`, `leisure=park`
+- 건물 수: 일반 building way 329개 + relation outer member 9개 = 338개 동
 - 저장 위치: `src/areas/hongjecheon/data/osm-snapshot.json`
 
 런타임에는 이 원본을 직접 내려받지 않습니다. `npm run data:chunks`가 240 m 셀 단위의 `generated/chunks/*.json`, 수면만 담은 `base-map.json`, 축약 미니맵과 청크 인덱스를 생성합니다. 이 파일들은 같은 OSM 스냅샷의 파생물이며 출처와 라이선스도 동일합니다.
@@ -37,13 +38,14 @@
 
 ## 추정 또는 제작 데이터
 
-- OSM에 `height` 또는 `building:levels`가 있으면 건물 높이에 사용합니다.
+- OSM에 `height` 또는 `building:levels`가 있으면 건물 높이에 사용합니다. 관계형 공동주택 8개 동은 relation의 53 m 높이와 19층 태그를 outer member에 상속합니다.
 - 높이 태그가 없으면 7–31 m 범위의 결정적 추정값을 사용합니다. 이는 실제 높이가 아닙니다.
 - SRTM 격자로 표현하지 못하는 제방·계단·미세 지형, 장식용 나무, 착륙 패드, 탐험 링은 MVP용 제작 요소입니다.
 - 하천과 도로는 DEM 표면을 따르지만 수면 및 교량의 세부 높이는 시각적 분리를 위한 근사값입니다.
 - 로드뷰 이미지, 지도 타일, 제3자 텍스처는 수집하거나 포함하지 않았습니다.
 - 공식 공역, 비행금지·제한구역, 임시 제한 데이터는 수집하거나 포함하지 않았습니다.
 - 건물 창문 패턴과 흐르는 수면 무늬는 코드에서 생성한 절차형 텍스처입니다.
+- 옥상 파라펫·설비실·물탱크·캐노피·발코니 띠는 실제 윤곽과 건물 용도를 바탕으로 생성하지만 실제 설비의 위치·형태를 재현한 것은 아닙니다.
 
 ## 실제 건물 사진 텍스처
 

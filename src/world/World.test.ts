@@ -21,6 +21,27 @@ describe('Hongjecheon world', () => {
     assert.ok(world.scene.children.length > 10);
   });
 
+  it('includes multipolygon relation building parts that were previously omitted', () => {
+    const relationPartIds = [1255196438, 1111519319, 1111519320, 1111519321, 1111519318, 1111519317, 1111519312, 1111519313, 1111519311];
+    const ids = new Set(snapshot.buildings.map((building) => building.id));
+    assert.equal(snapshot.buildings.length, 338);
+    relationPartIds.forEach((id) => assert.equal(ids.has(id), true));
+    assert.equal(snapshot.buildings.find((building) => building.id === 1111519319)?.height, 53);
+  });
+
+  it('builds quality-scaled rooftop and facade detail meshes', () => {
+    const details: THREE.Object3D[] = [];
+    [...world.chunks.values()].forEach((chunk) => chunk.root.traverse((object) => {
+      if (object.name.startsWith('quality-detail-building-')) details.push(object);
+    }));
+    assert.ok(details.some((object) => object.name === 'quality-detail-building-rooftops'));
+    assert.ok(details.some((object) => object.name === 'quality-detail-building-facades'));
+    assert.ok(details.every((object) => object.visible === false));
+    world.setQuality('medium');
+    assert.ok(details.every((object) => object.visible === true));
+    world.setQuality('low');
+  });
+
   it('starts the drone outside building collision volumes', () => {
     assert.equal(collision.check(world.startPosition), undefined);
   });

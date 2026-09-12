@@ -18,6 +18,12 @@ interface StreamedChunkContent {
   lastUsed: number;
 }
 
+interface BuildingDetailInstance {
+  position: THREE.Vector3;
+  scale: THREE.Vector3;
+  rotationY: number;
+}
+
 export interface StreamingStats {
   active: number;
   cached: number;
@@ -40,6 +46,7 @@ export class World {
   private readonly facadeMaterials = [createFacadeMaterial(0), createFacadeMaterial(1), createFacadeMaterial(2)];
   private readonly roofMaterial = new THREE.MeshStandardMaterial({ color: 0x777d78, roughness: 0.94 });
   private readonly rooftopMaterial = new THREE.MeshStandardMaterial({ color: 0x9da5a1, roughness: 0.78, metalness: 0.18 });
+  private readonly buildingTrimMaterial = new THREE.MeshStandardMaterial({ color: 0x536166, roughness: 0.68, metalness: 0.12 });
   private readonly simpleBuildingMaterial = new THREE.MeshStandardMaterial({ color: 0x9da8a1, roughness: 1 });
   private readonly waterMaterial = createWaterMaterial();
   private readonly parkMaterial = new THREE.MeshStandardMaterial({ color: 0x678967, roughness: 1 });
@@ -232,7 +239,10 @@ export class World {
       root: THREE.Object3D;
       detailed: Map<THREE.Material, THREE.BufferGeometry[]>;
       photos: Array<{ geometry: THREE.BufferGeometry; materials: THREE.Material[] }>;
-      rooftops: THREE.BufferGeometry[];
+      rooftopBoxes: BuildingDetailInstance[];
+      facadeBoxes: BuildingDetailInstance[];
+      tanks: BuildingDetailInstance[];
+      roofVolumes: BuildingDetailInstance[];
       simple: THREE.BufferGeometry[];
     };
     const builders = new Map<string, Builder>();
@@ -244,20 +254,33 @@ export class World {
       const chunk = this.chunks.getOrCreate(centerX, centerZ);
       let builder = builders.get(chunk.key);
       if (!builder) {
-        builder = { chunk, root: targetRoots.get(chunk.key) ?? chunk.root, detailed: new Map(), photos: [], rooftops: [], simple: [] };
+        builder = {
+          chunk,
+          root: targetRoots.get(chunk.key) ?? chunk.root,
+          detailed: new Map(),
+          photos: [],
+          rooftopBoxes: [],
+          facadeBoxes: [],
+          tanks: [],
+          roofVolumes: [],
+          simple: [],
+        };
         builders.set(chunk.key, builder);
       }
       const shape = new THREE.Shape();
       points.forEach((point, index) => index === 0 ? shape.moveTo(point.x, -point.z) : shape.lineTo(point.x, -point.z));
       shape.closePath();
       const height = Math.min(65, Math.max(5, feature.height ?? 7 + seeded(feature.id) * 24));
-      const geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+      const minHeight = Math.min(height - 3, Math.max(0, feature.minHeight ?? 0));
+      const roofHeight = Math.min(height * 0.25, Math.max(0, feature.roofHeight ?? (feature.kind === 'house' ? Math.min(2.8, height * 0.22) : 0)));
+      const wallHeight = Math.max(3, height - minHeight - roofHeight);
+      const geometry = new THREE.ExtrudeGeometry(shape, { depth: wallHeight, bevelEnabled: false });
       geometry.rotateX(-Math.PI / 2);
       const baseHeight = this.heightField.sampleHeight(centerX, centerZ);
-      geometry.translate(0, baseHeight, 0);
+      geometry.translate(0, baseHeight + minHeight, 0);
       geometry.computeBoundingBox();
       const box = geometry.boundingBox!;
-      this.colliders.push({ minX: box.min.x, maxX: box.max.x, minY: baseHeight, maxY: baseHeight + height, minZ: box.min.z, maxZ: box.max.z, label: feature.name || '주변 건물' });
+      this.colliders.push({ minX: box.min.x, maxX: box.max.x, minY: baseHeight + minHeight, maxY: baseHeight + height, minZ: box.min.z, maxZ: box.max.z, label: feature.name || '주변 건물' });
       geometry.translate(-chunk.x, 0, -chunk.z);
       const photoMaterials = this.photoFacadeMaterials.get(feature.id);
       if (photoMaterials) {
@@ -272,23 +295,14 @@ export class World {
 
       const width = Math.max(1, box.max.x - box.min.x);
       const depth = Math.max(1, box.max.z - box.min.z);
-      if (width > 6 && depth > 6 && seeded(feature.id + 311) > 0.48) {
-        const equipmentWidth = Math.min(4, width * 0.32);
-        const equipmentDepth = Math.min(3.2, depth * 0.28);
-        const equipmentHeight = 0.55 + seeded(feature.id + 503) * 0.9;
-        const rooftop = new THREE.BoxGeometry(equipmentWidth, equipmentHeight, equipmentDepth);
-        rooftop.translate(
-          centerX - chunk.x + (seeded(feature.id + 719) - 0.5) * width * 0.32,
-          baseHeight + height + equipmentHeight / 2,
-          centerZ - chunk.z + (seeded(feature.id + 877) - 0.5) * depth * 0.32,
-        );
-        builder.rooftops.push(rooftop);
-      }
-      const simplified = new THREE.BoxGeometry(width, height, depth);
-      simplified.translate(centerX - chunk.x, baseHeight + height / 2, centerZ - chunk.z);
+      this.addBuildingDetails(feature, points, builder.rooftopBoxes, builder.facadeBoxes, builder.tanks, builder.roofVolumes, {
+        centerX, centerZ, width, depth, baseHeight, height, roofHeight, wallTop: baseHeight + minHeight + wallHeight, chunkX: chunk.x, chunkZ: chunk.z,
+      });
+      const simplified = new THREE.BoxGeometry(width, wallHeight + roofHeight, depth);
+      simplified.translate(centerX - chunk.x, baseHeight + minHeight + (wallHeight + roofHeight) / 2, centerZ - chunk.z);
       builder.simple.push(simplified);
     });
-    builders.forEach(({ chunk, root, detailed, photos, rooftops, simple }) => {
+    builders.forEach(({ chunk, root, detailed, photos, rooftopBoxes, facadeBoxes, tanks, roofVolumes, simple }) => {
       const simpleGeometry = mergeGeometries(simple);
       if (!simpleGeometry) return;
       const near = new THREE.Group();
@@ -299,13 +313,10 @@ export class World {
       photos.forEach(({ geometry, materials }) => {
         near.add(this.buildingMesh(geometry, [this.roofMaterial, ...materials], quality));
       });
-      const rooftopGeometry = rooftops.length > 0 ? mergeGeometries(rooftops) : null;
-      if (rooftopGeometry) {
-        const rooftopMesh = this.buildingMesh(rooftopGeometry, this.rooftopMaterial, quality);
-        rooftopMesh.name = 'quality-detail-rooftops';
-        rooftopMesh.visible = this.quality !== 'low';
-        near.add(rooftopMesh);
-      }
+      this.addBuildingDetailInstances(near, rooftopBoxes, new THREE.BoxGeometry(1, 1, 1), this.rooftopMaterial, 'quality-detail-building-rooftops', quality);
+      this.addBuildingDetailInstances(near, facadeBoxes, new THREE.BoxGeometry(1, 1, 1), this.buildingTrimMaterial, 'quality-detail-building-facades', quality);
+      this.addBuildingDetailInstances(near, tanks, new THREE.CylinderGeometry(1, 1.04, 1, 12), this.rooftopMaterial, 'quality-detail-building-tanks', quality);
+      this.addBuildingDetailInstances(near, roofVolumes, new THREE.ConeGeometry(1, 1, 4), this.rooftopMaterial, 'quality-detail-building-roof-volumes', quality);
       const simpleMesh = new THREE.Mesh(simpleGeometry, this.simpleBuildingMaterial);
       simpleMesh.receiveShadow = true;
       const lod = new THREE.LOD();
@@ -314,6 +325,142 @@ export class World {
       lod.addLevel(simpleMesh, this.chunks.settings.lodDistance);
       root.add(lod);
     });
+  }
+
+  private addBuildingDetails(
+    feature: GeoFeature,
+    points: THREE.Vector3[],
+    rooftopBoxes: BuildingDetailInstance[],
+    facadeBoxes: BuildingDetailInstance[],
+    tanks: BuildingDetailInstance[],
+    roofVolumes: BuildingDetailInstance[],
+    size: { centerX: number; centerZ: number; width: number; depth: number; baseHeight: number; height: number; roofHeight: number; wallTop: number; chunkX: number; chunkZ: number },
+  ) {
+    if (size.width < 3 || size.depth < 3) return;
+    const edges = points.map((from, index) => {
+      const to = points[(index + 1) % points.length];
+      return { from, to, length: Math.hypot(to.x - from.x, to.z - from.z) };
+    }).filter((edge) => edge.length > 0.8).sort((left, right) => right.length - left.length);
+
+    if (size.width > 5 && size.depth > 5) {
+      edges.forEach((edge) => {
+        rooftopBoxes.push(this.segmentBox(edge.from, edge.to, size.wallTop + 0.28, 0.56, 0.2, size.chunkX, size.chunkZ));
+      });
+    }
+
+    if (size.width > 6 && size.depth > 6 && seeded(feature.id + 311) > 0.34) {
+      const equipmentWidth = Math.min(5.5, size.width * 0.32);
+      const equipmentDepth = Math.min(4.2, size.depth * 0.28);
+      const equipmentHeight = 0.65 + seeded(feature.id + 503) * 1.2;
+      rooftopBoxes.push({
+        position: new THREE.Vector3(
+          size.centerX - size.chunkX + (seeded(feature.id + 719) - 0.5) * size.width * 0.28,
+          size.wallTop + equipmentHeight / 2,
+          size.centerZ - size.chunkZ + (seeded(feature.id + 877) - 0.5) * size.depth * 0.28,
+        ),
+        scale: new THREE.Vector3(equipmentWidth, equipmentHeight, equipmentDepth),
+        rotationY: 0,
+      });
+    }
+
+    if (size.height > 16 && Math.min(size.width, size.depth) > 7 && seeded(feature.id + 991) > 0.38) {
+      const radius = Math.min(1.45, Math.min(size.width, size.depth) * 0.11);
+      const tankHeight = 1.3 + seeded(feature.id + 1103) * 1.1;
+      tanks.push({
+        position: new THREE.Vector3(size.centerX - size.chunkX - size.width * 0.18, size.wallTop + tankHeight / 2, size.centerZ - size.chunkZ + size.depth * 0.16),
+        scale: new THREE.Vector3(radius, tankHeight, radius),
+        rotationY: 0,
+      });
+    }
+
+    const apartmentLike = ['apartments', 'hospital', 'commercial', 'retail'].includes(feature.kind);
+    if ((apartmentLike || (size.height > 20 && seeded(feature.id + 1217) > 0.7)) && edges.length > 0) {
+      const ledgeEdges = edges.filter((edge) => edge.length > 7).slice(0, 2);
+      const floorCount = Math.min(12, Math.max(1, Math.floor((size.wallTop - size.baseHeight - 4) / 3.2)));
+      ledgeEdges.forEach((edge) => {
+        for (let floor = 1; floor <= floorCount; floor += 1) {
+          facadeBoxes.push(this.segmentBox(edge.from, edge.to, size.baseHeight + 2.9 + floor * 3.2, 0.13, 0.62, size.chunkX, size.chunkZ, 0.22, Number.POSITIVE_INFINITY, size.centerX, size.centerZ));
+        }
+      });
+    }
+
+    const entrance = edges[0];
+    if (entrance && entrance.length > 5 && seeded(feature.id + 1301) > 0.42) {
+      facadeBoxes.push(this.segmentBox(entrance.from, entrance.to, size.baseHeight + 2.65, 0.2, 1.5, size.chunkX, size.chunkZ, 0.64, Math.min(4, entrance.length * 0.45), size.centerX, size.centerZ));
+    }
+
+    if (size.roofHeight > 0 && size.width > 4 && size.depth > 4) {
+      const radius = Math.hypot(size.width, size.depth) * 0.38;
+      roofVolumes.push({
+        position: new THREE.Vector3(size.centerX - size.chunkX, size.wallTop + size.roofHeight / 2, size.centerZ - size.chunkZ),
+        scale: new THREE.Vector3(radius, size.roofHeight, radius),
+        rotationY: Math.PI / 4,
+      });
+    }
+  }
+
+  private segmentBox(
+    from: THREE.Vector3,
+    to: THREE.Vector3,
+    y: number,
+    height: number,
+    depth: number,
+    chunkX: number,
+    chunkZ: number,
+    outwardOffset = 0,
+    maximumLength = Number.POSITIVE_INFINITY,
+    buildingCenterX = 0,
+    buildingCenterZ = 0,
+  ) {
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const fullLength = Math.hypot(dx, dz) || 1;
+    const length = Math.min(fullLength, maximumLength);
+    const middleX = (from.x + to.x) / 2;
+    const middleZ = (from.z + to.z) / 2;
+    let normalX = -dz / fullLength;
+    let normalZ = dx / fullLength;
+    const angle = Math.atan2(dz, dx);
+    if (outwardOffset !== 0) {
+      if (normalX * (middleX - buildingCenterX) + normalZ * (middleZ - buildingCenterZ) < 0) {
+        normalX *= -1;
+        normalZ *= -1;
+      }
+    }
+    return {
+      position: new THREE.Vector3(middleX - chunkX + normalX * outwardOffset, y, middleZ - chunkZ + normalZ * outwardOffset),
+      scale: new THREE.Vector3(length, height, depth),
+      rotationY: -angle,
+    };
+  }
+
+  private addBuildingDetailInstances(
+    parent: THREE.Object3D,
+    instances: BuildingDetailInstance[],
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    name: string,
+    quality: Quality,
+  ) {
+    if (instances.length === 0) {
+      geometry.dispose();
+      return;
+    }
+    const mesh = new THREE.InstancedMesh(geometry, material, instances.length);
+    const matrix = new THREE.Matrix4();
+    const quaternion = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    instances.forEach((instance, index) => {
+      quaternion.setFromAxisAngle(up, instance.rotationY);
+      matrix.compose(instance.position, quaternion, instance.scale);
+      mesh.setMatrixAt(index, matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.name = name;
+    mesh.castShadow = quality === 'high';
+    mesh.receiveShadow = true;
+    mesh.visible = quality !== 'low';
+    parent.add(mesh);
   }
 
   private addBridges(data: AreaSnapshot, targetChunk?: SpatialChunk, targetRoot: THREE.Object3D = targetChunk?.root ?? this.scene) {
@@ -538,6 +685,7 @@ export class World {
     for (const chunk of this.chunks.values()) {
       chunk.root.traverse((object: THREE.Object3D) => {
         if (object instanceof THREE.Mesh) object.castShadow = quality === 'high';
+        if (object.name.startsWith('quality-detail-')) object.visible = quality !== 'low';
         if (!(object instanceof THREE.LOD) || object.levels.length < 2) return;
         object.levels[1].distance = object.name.startsWith('vegetation') ? settings.lodDistance * 0.72 : settings.lodDistance;
       });

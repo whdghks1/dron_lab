@@ -6,18 +6,49 @@ if (!inputPath) throw new Error('Usage: node scripts/import-osm.mjs <overpass.js
 const raw = JSON.parse(readFileSync(inputPath, 'utf8'));
 const outputPath = resolve('src/areas/hongjecheon/data/osm-snapshot.json');
 const point = ({ lat, lon }) => ({ lat: Number(lat.toFixed(7)), lon: Number(lon.toFixed(7)) });
-const numeric = (value) => Number.parseFloat(String(value ?? '').replace(/[^0-9.]/g, ''));
+const numeric = (value) => Number.parseFloat(String(value ?? '').match(/-?\d+(?:\.\d+)?/)?.[0] ?? '');
+const optionalNumber = (value) => {
+  const result = numeric(value);
+  return Number.isFinite(result) ? result : undefined;
+};
 
-const features = raw.elements
+function feature(id, geometry, tags = {}) {
+  const levels = optionalNumber(tags['building:levels']);
+  return {
+    id,
+    name: tags.name || undefined,
+    kind: tags.highway || tags.waterway || tags.natural || tags.water || tags.building || tags.leisure || 'unknown',
+    points: geometry.map(point),
+    height: optionalNumber(tags.height) || (levels ? levels * 3.2 : undefined),
+    levels,
+    minHeight: optionalNumber(tags.min_height) || (optionalNumber(tags['building:min_level']) ? optionalNumber(tags['building:min_level']) * 3.2 : undefined),
+    roofHeight: optionalNumber(tags['roof:height']),
+    roofShape: tags['roof:shape'] || undefined,
+    buildingMaterial: tags['building:material'] || undefined,
+    facadeColor: tags['building:colour'] || undefined,
+    roofColor: tags['roof:colour'] || undefined,
+    tags,
+  };
+}
+
+const featuresById = new Map();
+raw.elements
   .filter((item) => item.type === 'way' && item.geometry?.length >= 2)
-  .map((item) => ({
-    id: item.id,
-    name: item.tags?.name || undefined,
-    kind: item.tags?.highway || item.tags?.waterway || item.tags?.natural || item.tags?.water || item.tags?.building || item.tags?.leisure || 'unknown',
-    points: item.geometry.map(point),
-    height: numeric(item.tags?.height) || (numeric(item.tags?.['building:levels']) ? numeric(item.tags['building:levels']) * 3.2 : undefined),
-    tags: item.tags || {},
-  }));
+  .forEach((item) => featuresById.set(item.id, feature(item.id, item.geometry, item.tags)));
+
+let relationBuildingParts = 0;
+raw.elements
+  .filter((item) => item.type === 'relation' && item.tags?.building)
+  .flatMap((item) => (item.members ?? [])
+    .filter((member) => member.type === 'way' && member.role === 'outer' && member.geometry?.length >= 4)
+    .map((member) => feature(member.ref, member.geometry, item.tags)))
+  .forEach((item) => {
+    if (featuresById.has(item.id)) return;
+    featuresById.set(item.id, item);
+    relationBuildingParts += 1;
+  });
+
+const features = [...featuresById.values()];
 const clean = (feature) => Object.fromEntries(Object.entries(feature).filter(([key, value]) => key !== 'tags' && value !== undefined));
 const isWater = (feature) => feature.tags.waterway || feature.tags.natural === 'water' || feature.tags.water;
 const isPath = (feature) => ['footway', 'cycleway', 'path', 'pedestrian'].includes(feature.tags.highway);
@@ -35,4 +66,4 @@ const snapshot = {
 };
 mkdirSync(dirname(outputPath), { recursive: true });
 writeFileSync(outputPath, `${JSON.stringify(snapshot)}\n`);
-console.log(`Wrote ${outputPath}: ${snapshot.buildings.length} buildings, ${snapshot.roads.length} roads, ${snapshot.paths.length} paths`);
+console.log(`Wrote ${outputPath}: ${snapshot.buildings.length} buildings (${relationBuildingParts} relation parts), ${snapshot.roads.length} roads, ${snapshot.paths.length} paths`);
