@@ -62,8 +62,32 @@ export class DroneLabApp {
     document.title = `DRONE LAB — ${data.config.name}`;
     document.getElementById('area-name')!.textContent = data.config.name;
     document.getElementById('area-description')!.textContent = `${data.config.subtitle}의 실제 공간 관계를 따라 비행해 보세요.`;
-    const credits = [...new Set(data.visuals?.buildingPhotoTextures?.map((photo) => `${photo.attribution} (${photo.license})`) ?? [])];
-    if (credits.length > 0) document.getElementById('visual-credits')!.textContent = ` · 건물 사진: ${credits.join(', ')}`;
+    const credits = [...new Map((data.visuals?.buildingPhotoTextures ?? []).map((photo) => [photo.sourceUrl ?? photo.attribution, photo])).values()];
+    const creditElement = document.getElementById('visual-credits')!;
+    if (credits.length > 0) {
+      creditElement.append(' · 건물 사진: ');
+      credits.forEach((photo, index) => {
+        if (index > 0) creditElement.append(', ');
+        if (photo.sourceUrl) {
+          const source = document.createElement('a');
+          source.textContent = photo.attribution;
+          source.href = photo.sourceUrl;
+          source.target = '_blank';
+          source.rel = 'noreferrer';
+          creditElement.append(source);
+        } else creditElement.append(photo.attribution);
+        creditElement.append(' (');
+        if (photo.licenseUrl) {
+          const license = document.createElement('a');
+          license.textContent = photo.license;
+          license.href = photo.licenseUrl;
+          license.target = '_blank';
+          license.rel = 'noreferrer';
+          creditElement.append(license);
+        } else creditElement.append(photo.license);
+        creditElement.append(')');
+      });
+    }
     this.bindUi();
     this.resize();
     this.reset(false);

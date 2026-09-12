@@ -22,6 +22,7 @@ async function bootstrap() {
       window.location.assign(url);
     });
     const data = await loadArea(selectedArea);
+    canvas.setAttribute('aria-label', `${data.config.name} 3D 드론 비행장`);
     const app = new DroneLabApp(canvas, data);
     await app.prepare();
     app.start();

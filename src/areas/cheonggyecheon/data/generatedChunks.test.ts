@@ -10,9 +10,9 @@ import type { AreaSnapshot } from '../../types';
 const dataDirectory = dirname(fileURLToPath(import.meta.url));
 const categories = ['buildings', 'roads', 'paths', 'bridges', 'parks'] as const;
 
-describe('Hongjecheon generated area chunks', () => {
+describe('Cheonggyecheon generated area chunks', () => {
   it('contains every chunk file declared in the index', () => {
-    assert.ok(index.chunks.length > 1);
+    assert.equal(index.chunks.length, 32);
     for (const chunk of index.chunks) {
       const parsed = JSON.parse(readFileSync(resolve(dataDirectory, 'generated/chunks', chunk.file), 'utf8')) as AreaSnapshot;
       assert.equal(parsed.water.length, 0);
@@ -27,15 +27,6 @@ describe('Hongjecheon generated area chunks', () => {
       for (const category of categories) totals[category] += parsed[category].length;
     }
     for (const category of categories) assert.equal(totals[category], source[category].length, category);
-  });
-
-  it('applies the sourced museum floor override to generated data', () => {
-    const buildings = index.chunks.flatMap((chunk) => {
-      const parsed = JSON.parse(readFileSync(resolve(dataDirectory, 'generated/chunks', chunk.file), 'utf8')) as AreaSnapshot;
-      return parsed.buildings;
-    });
-    const museum = buildings.find((building) => building.id === 174109591);
-    assert.equal(museum?.levels, 3);
-    assert.equal(source.buildings.find((building) => building.id === 174109591)?.levels, undefined);
+    assert.equal(totals.buildings, 1029);
   });
 });

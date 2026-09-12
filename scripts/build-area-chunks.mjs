@@ -1,11 +1,23 @@
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
-const sourcePath = process.argv[2] || 'src/areas/hongjecheon/data/osm-snapshot.json';
+const areaSpecs = {
+  hongjecheon: { origin: { lat: 37.5813046, lon: 126.9378073 } },
+  cheonggyecheon: { origin: { lat: 37.56925, lon: 126.9787 } },
+};
+const firstArgument = process.argv[2];
+const areaId = firstArgument && areaSpecs[firstArgument] ? firstArgument : 'hongjecheon';
+const sourcePath = firstArgument && !areaSpecs[firstArgument] ? firstArgument : `src/areas/${areaId}/data/osm-snapshot.json`;
 const snapshot = JSON.parse(readFileSync(sourcePath, 'utf8'));
-const outputRoot = resolve('src/areas/hongjecheon/data/generated');
+const overridePath = resolve(dirname(sourcePath), 'building-overrides.json');
+if (existsSync(overridePath)) {
+  const overrides = JSON.parse(readFileSync(overridePath, 'utf8'));
+  const byId = new Map(overrides.map((override) => [override.featureId, override.values]));
+  snapshot.buildings = snapshot.buildings.map((building) => ({ ...building, ...(byId.get(building.id) || {}) }));
+}
+const outputRoot = resolve(`src/areas/${areaId}/data/generated`);
 const chunkRoot = resolve(outputRoot, 'chunks');
-const origin = { lat: 37.5813046, lon: 126.9378073 };
+const origin = areaSpecs[areaId].origin;
 const chunkSize = 240;
 const metersPerLatitudeDegree = 111_320;
 const metersPerLongitudeDegree = metersPerLatitudeDegree * Math.cos(origin.lat * Math.PI / 180);

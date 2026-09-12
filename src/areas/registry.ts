@@ -14,6 +14,12 @@ const registrations: AreaRegistration[] = [
     subtitle: '서대문구 인공폭포 구간',
     load: async () => (await import('./hongjecheon/data/loadAreaData')).loadHongjecheonData(),
   },
+  {
+    id: 'cheonggyecheon-downtown',
+    name: '청계천',
+    subtitle: '청계광장–수표교 도심 구간',
+    load: async () => (await import('./cheonggyecheon/data/loadAreaData')).loadCheonggyecheonData(),
+  },
 ];
 
 export function listAreas(): ReadonlyArray<Omit<AreaRegistration, 'load'>> {

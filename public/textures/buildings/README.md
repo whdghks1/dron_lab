@@ -20,6 +20,8 @@
   ],
   attribution: '직접 촬영 · 홍길동',
   license: 'CC BY 4.0',
+  sourceUrl: 'https://example.com/original',
+  licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
 }
 ```
 

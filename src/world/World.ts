@@ -12,6 +12,17 @@ export type Quality = 'low' | 'medium' | 'high';
 
 const seeded = (id: number) => ((id * 9301 + 49297) % 233280) / 233280;
 
+function gableRoofGeometry() {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    -1, -0.5, -1, 1, -0.5, -1, 0, 0.5, -1,
+    -1, -0.5, 1, 1, -0.5, 1, 0, 0.5, 1,
+  ], 3));
+  geometry.setIndex([0, 1, 2, 5, 4, 3, 0, 3, 4, 0, 4, 1, 1, 4, 5, 1, 5, 2, 2, 5, 3, 2, 3, 0]);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 interface StreamedChunkContent {
   root: THREE.Group;
   colliders: BoxCollider[];
@@ -44,6 +55,7 @@ export class World {
   private readonly streamedChunks = new Map<string, StreamedChunkContent>();
   private readonly chunkRequests = new Map<string, Promise<void>>();
   private readonly facadeMaterials = [createFacadeMaterial(0), createFacadeMaterial(1), createFacadeMaterial(2)];
+  private readonly customFacadeMaterials = new Map<string, THREE.MeshStandardMaterial>();
   private readonly roofMaterial = new THREE.MeshStandardMaterial({ color: 0x777d78, roughness: 0.94 });
   private readonly rooftopMaterial = new THREE.MeshStandardMaterial({ color: 0x9da5a1, roughness: 0.78, metalness: 0.18 });
   private readonly buildingTrimMaterial = new THREE.MeshStandardMaterial({ color: 0x536166, roughness: 0.68, metalness: 0.12 });
@@ -226,6 +238,25 @@ export class World {
     }
   }
 
+  private facadeMaterialFor(feature: GeoFeature) {
+    const colorTag = feature.facadeColor && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(feature.facadeColor) ? feature.facadeColor : undefined;
+    const materialTag = feature.buildingMaterial?.toLowerCase();
+    if (!colorTag && !materialTag) return this.facadeMaterials[Math.floor(seeded(feature.id + 71) * this.facadeMaterials.length)];
+    const key = `${materialTag ?? 'default'}:${colorTag ?? 'default'}`;
+    const cached = this.customFacadeMaterials.get(key);
+    if (cached) return cached;
+    const glass = materialTag === 'glass';
+    const color = colorTag ?? (glass ? '#9abac4' : materialTag === 'wood' ? '#9b7655' : '#c5cbc5');
+    const material = new THREE.MeshStandardMaterial({
+      color,
+      map: glass ? null : this.facadeMaterials[0].map,
+      roughness: glass ? 0.24 : 0.72,
+      metalness: glass ? 0.16 : 0.03,
+    });
+    this.customFacadeMaterials.set(key, material);
+    return material;
+  }
+
   private buildingMesh(geometry: THREE.BufferGeometry, material: THREE.Material | THREE.Material[], quality: Quality) {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = quality === 'high';
@@ -242,7 +273,9 @@ export class World {
       rooftopBoxes: BuildingDetailInstance[];
       facadeBoxes: BuildingDetailInstance[];
       tanks: BuildingDetailInstance[];
-      roofVolumes: BuildingDetailInstance[];
+      pyramidRoofs: BuildingDetailInstance[];
+      gableRoofs: BuildingDetailInstance[];
+      roundRoofs: BuildingDetailInstance[];
       simple: THREE.BufferGeometry[];
     };
     const builders = new Map<string, Builder>();
@@ -262,7 +295,9 @@ export class World {
           rooftopBoxes: [],
           facadeBoxes: [],
           tanks: [],
-          roofVolumes: [],
+          pyramidRoofs: [],
+          gableRoofs: [],
+          roundRoofs: [],
           simple: [],
         };
         builders.set(chunk.key, builder);
@@ -270,9 +305,11 @@ export class World {
       const shape = new THREE.Shape();
       points.forEach((point, index) => index === 0 ? shape.moveTo(point.x, -point.z) : shape.lineTo(point.x, -point.z));
       shape.closePath();
-      const height = Math.min(65, Math.max(5, feature.height ?? 7 + seeded(feature.id) * 24));
+      const height = Math.min(65, Math.max(5, feature.height ?? (feature.levels ? feature.levels * 3.2 : 7 + seeded(feature.id) * 24)));
       const minHeight = Math.min(height - 3, Math.max(0, feature.minHeight ?? 0));
-      const roofHeight = Math.min(height * 0.25, Math.max(0, feature.roofHeight ?? (feature.kind === 'house' ? Math.min(2.8, height * 0.22) : 0)));
+      const roofShape = feature.roofShape ?? (feature.kind === 'house' ? 'gabled' : 'flat');
+      const inferredRoofHeight = roofShape === 'flat' ? 0 : Math.min(3.6, height * 0.22);
+      const roofHeight = Math.min(height * 0.25, Math.max(0, feature.roofHeight ?? inferredRoofHeight));
       const wallHeight = Math.max(3, height - minHeight - roofHeight);
       const geometry = new THREE.ExtrudeGeometry(shape, { depth: wallHeight, bevelEnabled: false });
       geometry.rotateX(-Math.PI / 2);
@@ -287,7 +324,7 @@ export class World {
         assignExtrudeSideMaterialGroups(geometry, photoMaterials.length);
         builder.photos.push({ geometry, materials: photoMaterials });
       } else {
-        const facade = this.facadeMaterials[Math.floor(seeded(feature.id + 71) * this.facadeMaterials.length)];
+        const facade = this.facadeMaterialFor(feature);
         const geometries = builder.detailed.get(facade) ?? [];
         geometries.push(geometry);
         builder.detailed.set(facade, geometries);
@@ -295,14 +332,14 @@ export class World {
 
       const width = Math.max(1, box.max.x - box.min.x);
       const depth = Math.max(1, box.max.z - box.min.z);
-      this.addBuildingDetails(feature, points, builder.rooftopBoxes, builder.facadeBoxes, builder.tanks, builder.roofVolumes, {
-        centerX, centerZ, width, depth, baseHeight, height, roofHeight, wallTop: baseHeight + minHeight + wallHeight, chunkX: chunk.x, chunkZ: chunk.z,
+      this.addBuildingDetails(feature, points, builder.rooftopBoxes, builder.facadeBoxes, builder.tanks, builder.pyramidRoofs, builder.gableRoofs, builder.roundRoofs, {
+        centerX, centerZ, width, depth, baseHeight, height, roofHeight, roofShape, wallTop: baseHeight + minHeight + wallHeight, chunkX: chunk.x, chunkZ: chunk.z,
       });
       const simplified = new THREE.BoxGeometry(width, wallHeight + roofHeight, depth);
       simplified.translate(centerX - chunk.x, baseHeight + minHeight + (wallHeight + roofHeight) / 2, centerZ - chunk.z);
       builder.simple.push(simplified);
     });
-    builders.forEach(({ chunk, root, detailed, photos, rooftopBoxes, facadeBoxes, tanks, roofVolumes, simple }) => {
+    builders.forEach(({ chunk, root, detailed, photos, rooftopBoxes, facadeBoxes, tanks, pyramidRoofs, gableRoofs, roundRoofs, simple }) => {
       const simpleGeometry = mergeGeometries(simple);
       if (!simpleGeometry) return;
       const near = new THREE.Group();
@@ -316,7 +353,11 @@ export class World {
       this.addBuildingDetailInstances(near, rooftopBoxes, new THREE.BoxGeometry(1, 1, 1), this.rooftopMaterial, 'quality-detail-building-rooftops', quality);
       this.addBuildingDetailInstances(near, facadeBoxes, new THREE.BoxGeometry(1, 1, 1), this.buildingTrimMaterial, 'quality-detail-building-facades', quality);
       this.addBuildingDetailInstances(near, tanks, new THREE.CylinderGeometry(1, 1.04, 1, 12), this.rooftopMaterial, 'quality-detail-building-tanks', quality);
-      this.addBuildingDetailInstances(near, roofVolumes, new THREE.ConeGeometry(1, 1, 4), this.rooftopMaterial, 'quality-detail-building-roof-volumes', quality);
+      this.addBuildingDetailInstances(near, pyramidRoofs, new THREE.ConeGeometry(1, 1, 4), this.rooftopMaterial, 'quality-detail-building-pyramid-roofs', quality);
+      this.addBuildingDetailInstances(near, gableRoofs, gableRoofGeometry(), this.rooftopMaterial, 'quality-detail-building-gable-roofs', quality);
+      const roundRoofGeometry = new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+      roundRoofGeometry.translate(0, -0.5, 0);
+      this.addBuildingDetailInstances(near, roundRoofs, roundRoofGeometry, this.rooftopMaterial, 'quality-detail-building-round-roofs', quality);
       const simpleMesh = new THREE.Mesh(simpleGeometry, this.simpleBuildingMaterial);
       simpleMesh.receiveShadow = true;
       const lod = new THREE.LOD();
@@ -333,8 +374,10 @@ export class World {
     rooftopBoxes: BuildingDetailInstance[],
     facadeBoxes: BuildingDetailInstance[],
     tanks: BuildingDetailInstance[],
-    roofVolumes: BuildingDetailInstance[],
-    size: { centerX: number; centerZ: number; width: number; depth: number; baseHeight: number; height: number; roofHeight: number; wallTop: number; chunkX: number; chunkZ: number },
+    pyramidRoofs: BuildingDetailInstance[],
+    gableRoofs: BuildingDetailInstance[],
+    roundRoofs: BuildingDetailInstance[],
+    size: { centerX: number; centerZ: number; width: number; depth: number; baseHeight: number; height: number; roofHeight: number; roofShape: string; wallTop: number; chunkX: number; chunkZ: number },
   ) {
     if (size.width < 3 || size.depth < 3) return;
     const edges = points.map((from, index) => {
@@ -390,12 +433,25 @@ export class World {
     }
 
     if (size.roofHeight > 0 && size.width > 4 && size.depth > 4) {
-      const radius = Math.hypot(size.width, size.depth) * 0.38;
-      roofVolumes.push({
+      const base = {
         position: new THREE.Vector3(size.centerX - size.chunkX, size.wallTop + size.roofHeight / 2, size.centerZ - size.chunkZ),
-        scale: new THREE.Vector3(radius, size.roofHeight, radius),
-        rotationY: Math.PI / 4,
-      });
+      };
+      if (['round', 'dome'].includes(size.roofShape)) {
+        roundRoofs.push({ ...base, scale: new THREE.Vector3(size.width / 2, size.roofHeight, size.depth / 2), rotationY: 0 });
+      } else if (['gabled', 'skillion'].includes(size.roofShape)) {
+        const rotate = size.width > size.depth;
+        gableRoofs.push({
+          ...base,
+          scale: new THREE.Vector3((rotate ? size.depth : size.width) / 2, size.roofHeight, (rotate ? size.width : size.depth) / 2),
+          rotationY: rotate ? Math.PI / 2 : 0,
+        });
+      } else {
+        pyramidRoofs.push({
+          ...base,
+          scale: new THREE.Vector3(size.width / Math.SQRT2, size.roofHeight, size.depth / Math.SQRT2),
+          rotationY: Math.PI / 4,
+        });
+      }
     }
   }
 

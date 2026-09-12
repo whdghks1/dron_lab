@@ -4,8 +4,8 @@ import { JsonChunkSource } from '../../JsonChunkSource';
 type JsonModule = { default: unknown };
 const modules = import.meta.glob<JsonModule>('./generated/chunks/*.json');
 
-export class HongjecheonChunkSource extends JsonChunkSource {
+export class CheonggyecheonChunkSource extends JsonChunkSource {
   constructor() {
-    super(chunkIndex, modules, './generated/chunks', '홍제천');
+    super(chunkIndex, modules, './generated/chunks', '청계천');
   }
 }

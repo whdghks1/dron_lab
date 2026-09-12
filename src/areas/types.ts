@@ -72,6 +72,8 @@ export interface BuildingPhotoTexture {
   sideUrls?: string[];
   attribution: string;
   license: string;
+  sourceUrl?: string;
+  licenseUrl?: string;
 }
 
 export interface AreaVisualConfig {

@@ -9,10 +9,10 @@ describe('area registry', () => {
   });
 
   it('exposes serializable area metadata', () => {
-    assert.deepEqual(listAreas()[0], {
-      id: 'hongjecheon-waterfall',
-      name: '홍제천',
-      subtitle: '서대문구 인공폭포 구간',
-    });
+    assert.deepEqual(listAreas(), [
+      { id: 'hongjecheon-waterfall', name: '홍제천', subtitle: '서대문구 인공폭포 구간' },
+      { id: 'cheonggyecheon-downtown', name: '청계천', subtitle: '청계광장–수표교 도심 구간' },
+    ]);
+    assert.equal(resolveAreaId('cheonggyecheon-downtown'), 'cheonggyecheon-downtown');
   });
 });

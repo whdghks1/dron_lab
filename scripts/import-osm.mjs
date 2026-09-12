@@ -2,9 +2,14 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const inputPath = process.argv[2];
-if (!inputPath) throw new Error('Usage: node scripts/import-osm.mjs <overpass.json>');
+const areaId = process.argv[3] || 'hongjecheon';
+const areaPaths = {
+  hongjecheon: 'src/areas/hongjecheon/data/osm-snapshot.json',
+  cheonggyecheon: 'src/areas/cheonggyecheon/data/osm-snapshot.json',
+};
+if (!inputPath || !areaPaths[areaId]) throw new Error('Usage: node scripts/import-osm.mjs <overpass.json> [hongjecheon|cheonggyecheon]');
 const raw = JSON.parse(readFileSync(inputPath, 'utf8'));
-const outputPath = resolve('src/areas/hongjecheon/data/osm-snapshot.json');
+const outputPath = resolve(areaPaths[areaId]);
 const point = ({ lat, lon }) => ({ lat: Number(lat.toFixed(7)), lon: Number(lon.toFixed(7)) });
 const numeric = (value) => Number.parseFloat(String(value ?? '').match(/-?\d+(?:\.\d+)?/)?.[0] ?? '');
 const optionalNumber = (value) => {
@@ -16,7 +21,7 @@ function feature(id, geometry, tags = {}) {
   const levels = optionalNumber(tags['building:levels']);
   return {
     id,
-    name: tags.name || undefined,
+    name: tags.name || tags['bridge:name'] || undefined,
     kind: tags.highway || tags.waterway || tags.natural || tags.water || tags.building || tags.leisure || 'unknown',
     points: geometry.map(point),
     height: optionalNumber(tags.height) || (levels ? levels * 3.2 : undefined),

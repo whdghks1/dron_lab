@@ -3,14 +3,24 @@ import { dirname, resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 const inputPath = process.argv[2];
-if (!inputPath) throw new Error('Usage: node scripts/import-dem.mjs <N37E126.hgt.gz>');
+const areaId = process.argv[3] || 'hongjecheon';
+const areaSpecs = {
+  hongjecheon: {
+    bounds: { south: 37.5762, west: 126.9320, north: 37.5850, east: 126.9430 },
+    origin: { lat: 37.5813046, lon: 126.9378073 },
+    rows: 33,
+    columns: 41,
+  },
+  cheonggyecheon: {
+    bounds: { south: 37.5662, west: 126.9750, north: 37.5723, east: 126.9905 },
+    origin: { lat: 37.56925, lon: 126.9787 },
+    rows: 29,
+    columns: 57,
+  },
+};
+if (!inputPath || !areaSpecs[areaId]) throw new Error('Usage: node scripts/import-dem.mjs <N37E126.hgt.gz> [hongjecheon|cheonggyecheon]');
 
-const south = 37.5762;
-const west = 126.9320;
-const north = 37.5850;
-const east = 126.9430;
-const rows = 33;
-const columns = 41;
+const { bounds: { south, west, north, east }, origin, rows, columns } = areaSpecs[areaId];
 const tileSouth = 37;
 const tileWest = 126;
 const tileSamples = 3601;
@@ -49,7 +59,6 @@ for (let row = 0; row < rows; row += 1) {
     values.push(Number(elevation(lat, lon).toFixed(2)));
   }
 }
-const origin = { lat: 37.5813046, lon: 126.9378073 };
 function gridElevation(lat, lon) {
   const column = (lon - west) / (east - west) * (columns - 1);
   const row = (north - lat) / (north - south) * (rows - 1);
@@ -75,7 +84,7 @@ const output = {
   maxElevation: Math.max(...values),
   values,
 };
-const outputPath = resolve('src/areas/hongjecheon/data/elevation.json');
+const outputPath = resolve(`src/areas/${areaId}/data/elevation.json`);
 mkdirSync(dirname(outputPath), { recursive: true });
 writeFileSync(outputPath, `${JSON.stringify(output)}\n`);
 console.log(`Wrote ${outputPath}: ${columns}x${rows}, ${output.minElevation}-${output.maxElevation} m, origin ${output.originElevation} m`);

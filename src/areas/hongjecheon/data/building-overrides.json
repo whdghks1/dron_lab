@@ -1,0 +1,9 @@
+[
+  {
+    "featureId": 174109591,
+    "values": { "levels": 3 },
+    "sourceUrl": "https://namu.sdm.go.kr/web/main/contents/guide_facility_floor",
+    "capturedAt": "2026-09-12",
+    "note": "공식 층별 안내에서 1F, 2F, 3F 확인. 높이는 런타임에서 층당 3.2 m로 추정."
+  }
+]
