@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import elevation from '../areas/hongjecheon/data/elevation.json';
 import { HONGJECHEON_CONFIG as config } from '../areas/hongjecheon/config';
+import { HONGJECHEON_DETAILS as details } from '../areas/hongjecheon/details';
+import { geoToLocal } from '../utils/geo';
 import { TerrainHeightField } from './TerrainHeightField';
 
 describe('Hongjecheon DEM height field', () => {
@@ -25,5 +27,17 @@ describe('Hongjecheon DEM height field', () => {
     const geometry = terrain.createGeometry(config.bounds);
     assert.equal(geometry.getAttribute('position').count, elevation.rows * elevation.columns);
     assert.equal(geometry.getAttribute('color').count, elevation.rows * elevation.columns);
+  });
+
+  it('keeps the authored stream corridor continuous while preserving distant DEM samples', () => {
+    const corridor = details.terrainCorridors![0];
+    const corrected = new TerrainHeightField(elevation, config.origin, [corridor]);
+    for (const point of corridor.points) {
+      const local = geoToLocal(point, config.origin);
+      assert.ok(Math.abs(corrected.sampleHeight(local.x, local.z) - point.height) < 0.001);
+    }
+
+    const middle = geoToLocal(corridor.points[Math.floor(corridor.points.length / 2)], config.origin);
+    assert.equal(corrected.sampleHeight(middle.x + 30, middle.z), corrected.sampleBaseHeight(middle.x + 30, middle.z));
   });
 });

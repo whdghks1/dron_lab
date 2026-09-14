@@ -14,23 +14,25 @@ export interface RiverbankStyle {
   materialPreset: DetailMaterialPreset;
   bankWidth: number;
   bankHeight: number;
+  waterHalfWidth: number;
   railing: boolean;
 }
 
 const PROFILE_STYLES: Record<RiverbankProfile, RiverbankStyle> = {
-  'concrete-slope': { materialPreset: 'light-concrete', bankWidth: 4.5, bankHeight: 1.3, railing: true },
-  'vertical-wall': { materialPreset: 'old-concrete', bankWidth: 2.2, bankHeight: 1.7, railing: true },
-  'stone-bank': { materialPreset: 'stone-bank', bankWidth: 4.2, bankHeight: 1.15, railing: false },
-  'grass-slope': { materialPreset: 'grass-soil', bankWidth: 5.5, bankHeight: 1.1, railing: false },
-  'walkway-edge': { materialPreset: 'wet-edge', bankWidth: 2, bankHeight: 0.42, railing: true },
+  'concrete-slope': { materialPreset: 'light-concrete', bankWidth: 4.5, bankHeight: 1.3, waterHalfWidth: 7.2, railing: true },
+  'vertical-wall': { materialPreset: 'old-concrete', bankWidth: 2.2, bankHeight: 1.7, waterHalfWidth: 7.2, railing: true },
+  'stone-bank': { materialPreset: 'stone-bank', bankWidth: 4.2, bankHeight: 1.15, waterHalfWidth: 7.2, railing: false },
+  'grass-slope': { materialPreset: 'grass-soil', bankWidth: 5.5, bankHeight: 1.1, waterHalfWidth: 7.2, railing: false },
+  'walkway-edge': { materialPreset: 'wet-edge', bankWidth: 2, bankHeight: 0.42, waterHalfWidth: 7.2, railing: true },
 };
 
-export function resolveRiverbankStyle(segment: Pick<RiverbankSegmentConfig, 'profile' | 'materialPreset' | 'bankWidth' | 'bankHeight' | 'railing'>): RiverbankStyle {
+export function resolveRiverbankStyle(segment: Pick<RiverbankSegmentConfig, 'profile' | 'materialPreset' | 'bankWidth' | 'bankHeight' | 'waterHalfWidth' | 'railing'>): RiverbankStyle {
   return {
     ...PROFILE_STYLES[segment.profile],
     ...(segment.materialPreset ? { materialPreset: segment.materialPreset } : {}),
     ...(segment.bankWidth !== undefined ? { bankWidth: segment.bankWidth } : {}),
     ...(segment.bankHeight !== undefined ? { bankHeight: segment.bankHeight } : {}),
+    ...(segment.waterHalfWidth !== undefined ? { waterHalfWidth: segment.waterHalfWidth } : {}),
     ...(segment.railing !== undefined ? { railing: segment.railing } : {}),
   };
 }
@@ -77,8 +79,7 @@ export class RiverbankBuilder {
         const entries = geometries.get(style.materialPreset) ?? [];
         entries.push(geometry);
         geometries.set(style.materialPreset, entries);
-        const innerDistance = 7.2;
-        const railLine = offsetPolyline(points, side * (innerDistance + style.bankWidth));
+        const railLine = offsetPolyline(points, side * (style.waterHalfWidth + style.bankWidth));
         railLine.forEach((point) => { point.y = this.options.heightAt(point.x, point.z) + style.bankHeight + 0.06; });
         if (style.railing) this.addRailings(railLine, railPosts, railBeams);
         if (this.options.segments?.length) this.addProfileColliders(railLine, style.bankHeight, feature.name || '하천 제방');
@@ -119,11 +120,10 @@ export class RiverbankBuilder {
   }
 
   private profileGeometry(points: THREE.Vector3[], side: number, profile: RiverbankProfile, style: RiverbankStyle) {
-    const innerDistance = 7.2;
-    const inner = offsetPolyline(points, side * innerDistance);
-    const outer = offsetPolyline(points, side * (innerDistance + style.bankWidth));
+    const inner = offsetPolyline(points, side * style.waterHalfWidth);
+    const outer = offsetPolyline(points, side * (style.waterHalfWidth + style.bankWidth));
     if (profile === 'walkway-edge') {
-      const line = offsetPolyline(points, side * (innerDistance + style.bankWidth / 2));
+      const line = offsetPolyline(points, side * (style.waterHalfWidth + style.bankWidth / 2));
       line.forEach((point) => { point.y = this.options.heightAt(point.x, point.z) + style.bankHeight; });
       return ribbonGeometry(line, style.bankWidth);
     }
